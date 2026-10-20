@@ -1,0 +1,20 @@
+# Generated artifacts and caches
+/zig-out/
+/.zig-cache/
+/zig-cache/
+/build/
+/dist/
+*.o
+*.obj
+*.efi
+*.elf
+*.img
+*.iso
+*.log
+
+# Local environment and editor state
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/

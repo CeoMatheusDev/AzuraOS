@@ -1,0 +1,248 @@
+AZURAOS — STATUS
+Data UTC: 2026-10-20 (data da atualização; hora não aferida)
+Projeto: AzuraOS
+Versão planejada: 0.1.0 (marco interno M0+M1); versão/tag publicada: nenhuma
+Arquitetura: x86_64 / UEFI; AArch64 e RISC-V futuros, não suportados
+Branch: nenhuma; repositório Git local NÃO inicializado neste diretório
+Último commit verificado: nenhum
+Última tag publicada: nenhuma
+Zig version: 0.17.0 VERIFICADA no Fedora 44 (zig version -> 0.17.0)
+QEMU: 10.2.2 VERIFICADO; OVMF: edk2-ovmf-20260812 VERIFICADO
+Estado geral: M1 CONCLUÍDO — boot UEFI x86_64 com log serial e framebuffer,
+              verificado em QEMU/OVMF. Evidência: docs/testing/m1-boot-evidence.md
+
+OBJETIVO DA TAREFA
+M0.1: estabelecer requisitos de toolchain, estratégia de build reproduzível e inventário Fedora.
+
+ESTADO ATUAL (resumo; o registro cronológico completo está abaixo)
+Implementado e VERIFICADO em QEMU/OVMF: bootloader UEFI, kernel freestanding,
+protocolo de boot v1, driver serial, splash no framebuffer, IDT de exceções,
+build.zig, build.zig.zon, imagem ESP, testes automatizados de boot e de falha.
+Implementado e verificado: docs/TOOLCHAIN.md, tools/check-toolchain.sh.
+Não iniciado: M2 (GDT/páginas próprias, ExitBootServices, alocadores, drivers),
+M3 (processos, escalonador, syscalls, IPC) e os demais marcos.
+Licença: decisão pendente. Repositório Git local: não inicializado neste diretório.
+
+ALTERAÇÕES E DECISÕES
+Criados docs/TOOLCHAIN.md e tools/check-toolchain.sh; atualizado docs/STATUS.txt.
+Zig 0.17.0 estável selecionado conforme site oficial em 2026-10-18.
+Licença adiada: arquivo LICENSE NÃO criado.
+Build planejado: Zig build, alvos explícitos x86_64-uefi e x86_64-freestanding, sem libc do host no kernel.
+Repositório remoto privado CeoMatheusDev/AzuraOS autorizado, mas criação não realizada (ação indisponível na integração atual).
+
+VALIDAÇÃO
+Executado no contêiner ChatGPT: inspeção de PATH e arquivos; git disponível, Zig e QEMU ausentes.
+Executado: revisão estática do script e criação dos arquivos.
+NÃO EXECUTADO: script no Fedora, zig version, zig env, compilação, testes Zig, boot QEMU, assinatura/hash da toolchain, verificação de reprodutibilidade.
+
+PROBLEMAS E RISCOS
+BLOQUEADOR: acesso ao Fedora indisponível; inventário local pendente.
+BLOQUEADOR: Zig 0.17.0 ausente no contêiner; APIs de build não verificadas por compilação.
+BLOQUEADOR: criação remota de repositório não exposta pela integração GitHub disponível.
+RISCO ALTO: diferenças de API Zig 0.17; configuração do target UEFI, ABI e link ELF64.
+RISCO MÉDIO: binários não determinísticos se opções, CPU e toolchain não forem fixadas.
+RISCO: script de diagnóstico não testado no Fedora; deve ser revisado pelos resultados reais.
+
+PENDÊNCIAS
+1. Executar tools/check-toolchain.sh no Fedora e enviar saída.
+2. Verificar Zig 0.17.0 e documentar hash/assinatura do artefato oficial.
+3. Validar API Zig 0.17 com build mínimo; criar build.zig apenas com evidência de compilação.
+4. Confirmar procedimento de criação do repositório remoto pela interface do GitHub.
+5. Preparar testes e artefatos M0 subsequentes.
+
+PRÓXIMAS ETAPAS E ACEITE
+M0.1 só poderá ser encerrada após: versão Zig observada no Fedora, build mínimo freestanding compilado com toolchain fixa, saída e hash do artefato registrados, comandos e resultados documentados.
+Próxima ação exata: executar tools/check-toolchain.sh no Fedora e retornar saída completa.
+
+CONTINUIDADE
+Último estado comprovadamente funcional: documentação gravada; script presente mas não testado no Fedora.
+Último commit verificado: nenhum. Última tag publicada: nenhuma.
+Retomada: inspecionar saída Fedora; validar instalação Zig; criar build mínimo incremental.
+Rollback: excluir arquivos locais desta etapa; nenhuma modificação de configuração externa foi executada.
+
+HISTÓRICO
+2026-10-18: M0 inicial: leitura Prompt Mestre e diagnóstico inicial; sem build.
+2026-10-18: M0.1: Zig 0.17.0 selecionado; política documentada; script de inspeção criado; sem compilação.
+2026-10-18: M0.1 continuação: relido Prompt Mestre integral e inspecionados arquivos locais; consultado índice oficial Zig e confirmado 0.17.0 de 2026-10-01, hash SHA-256 oficial para x86_64-linux. Criado tools/verify-zig-release.sh. Executado `bash -n tools/*.sh` (exit 0); casos negativos de verificador (arquivo inexistente e argumentos ausentes) retornaram exit 2, conforme esperado. NÃO EXECUTADO: verificação positiva do tarball, compilação Zig, QEMU, comandos no Fedora. GitHub: nenhuma criação remota nesta tarefa. Próxima ação: receber inventário do Fedora, baixar artefato oficial e verificar hash antes de executar Zig.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — TESTES DE FERRAMENTAS
+Criado tests/toolchain/test-verify-zig-release.sh, sem dependências externas, com quatro casos negativos: argumentos ausentes (exit 2), arquivo inexistente (exit 2), checksum incorreto (exit 1) e nome incorreto (exit 2).
+Corrigido tools/check-toolchain.sh para lidar com ausência de rpm em ambientes não Fedora sem erro de comando inexistente.
+VALIDAÇÃO REAL NO CONTÊINER (Debian 13, x86_64): bash -n tools/*.sh tests/toolchain/*.sh: exit 0; bash tests/toolchain/test-verify-zig-release.sh: PASS, 4 casos; bash tools/check-toolchain.sh: executou e informou Zig e QEMU ausentes, Git 2.47.3, rpm ausente. Não houve compilação Zig nem execução QEMU.
+NÃO VALIDADO: pacote oficial Zig, SHA-256 positivo, Fedora do usuário, compilação freestanding, reprodutibilidade de artefatos.
+PRÓXIMA AÇÃO: executar bash tools/check-toolchain.sh no Fedora e compartilhar saída. M0.1 ainda aberta.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — CONTRATO DE BUILD
+Criado docs/BUILD_CONTRACT.md: invariantes, separação de artefatos, requisitos de freestanding, proibição de dependências runtime do host e critérios objetivos de aceite.
+Criado tools/check-build-host.sh: inventário de ferramentas para inspeção ELF e comparação de hashes, sem modificações de sistema.
+Ainda não foi criado build.zig: API Zig não verificada por compilação. Não foi criado LICENSE, tag, release ou repositório remoto.
+Validação desta alteração: ver resultados do próximo registro. Inventário Fedora e compilação freestanding continuam pendentes.
+VALIDAÇÃO REAL — CONTÊINER CHATGPT (NÃO FEDORA): `bash -n tools/*.sh tests/toolchain/*.sh` exit 0; `bash tests/toolchain/test-verify-zig-release.sh` PASS (4 testes negativos); `bash tools/check-build-host.sh` exit 0: Zig ausente, file/readelf/sha256sum/bash/git presentes, arquitetura x86_64. Nenhum build Zig realizado. O script novo ainda não foi executado no Fedora.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — CONTINUAÇÃO 005
+Alteração local: criado tests/toolchain/test-host-diagnostics.sh para executar smoke tests dos dois diagnósticos sem depender de Zig/QEMU.
+Limite: o teste é executado somente no ambiente ChatGPT, não no Fedora. Não valida compilação nem funcionalidade do AzuraOS.
+Repositório GitHub: ainda não criado; conector acessível, mas sem operação de criação de repositório exposta.
+Próximo bloqueador: saída dos diagnósticos executados pelo responsável no Fedora.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — GATE ESTÁTICO ELF
+Criados tools/check-kernel-elf.sh e tests/build/test-check-kernel-elf.sh.
+Escopo: rejeitar ELF que não seja ELF64 little-endian x86_64 ET_EXEC, sem PT_LOAD, ou com PT_INTERP/PT_DYNAMIC. Essa política ET_EXEC é provisória para o primeiro kernel sem relocação; PIE/ET_DYN exigirá revisão explícita do contrato.
+O gate não valida endereços físicos, relocations, permissões de segmentos, integridade do arquivo inteiro nem boot real. Não substitui validações do loader ELF64.
+Validação: registrada no ciclo corrente após execução dos scripts; nenhum kernel Zig disponível para teste positivo.
+Pendente: resultados Fedora, toolchain Zig e build real; M0.1 permanece aberta.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — TESTE POSITIVO DO GATE ELF
+Inspeção real: arquivos locais presentes; Zig e QEMU ausentes no PATH deste contêiner; GNU as, ld e readelf presentes. Fedora do responsável ainda não inspecionado.
+Criado tests/build/test-check-kernel-elf-positive.sh: gera fixture ELF64 x86_64 ET_EXEC usando GNU as/ld do host, sem libc ou interpretador dinâmico, e executa gate ELF. Fixture descartável; NÃO é kernel AzuraOS e não prova compilação Zig ou boot.
+Corrigido tests/build/test-check-kernel-elf.sh: invoca verificador com bash, pois o arquivo não tem bit executável. Antes disso, testes negativos podiam passar por Permission denied, criando falso positivo de teste. O teste positivo também usa bash.
+VALIDAÇÃO EXECUTADA: bash tests/build/test-check-kernel-elf.sh: PASS; bash tests/build/test-check-kernel-elf-positive.sh: PASS, saída 'PASS: ELF64 x86_64 ET_EXEC; PT_LOAD present; no PT_INTERP/PT_DYNAMIC'; bash -n tests/build/*.sh: PASS. Testes de diagnóstico e SHA negativos executados neste ciclo: PASS. Nenhuma compilação Zig, boot QEMU ou teste Fedora.
+RISCO REMANESCENTE: os testes negativos não distinguem ainda todas as categorias de falha do verificador; gate ELF inspeciona apenas metadados, não valida integralmente segurança dos segmentos. Verificar Zig no Fedora permanece bloqueador M0.1.
+CONTINUIDADE: obter `zig version`, `zig env` e inventário Fedora; só então implementar build.zig usando API verificada. Repositório remoto, commits, tags e releases: nenhum nesta etapa.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — CONTINUAÇÃO 008 (TESTES ELF)
+Objetivo: impedir falsos positivos nos testes negativos do gate ELF.
+IMPLEMENTADO: tests/build/test-check-kernel-elf.sh agora exige códigos de saída esperados e mensagens de rejeição; para /bin/true, exige diagnóstico do gate e aceita diferenças de formato entre hosts.
+VALIDAÇÃO REAL (contêiner ChatGPT, NÃO Fedora): `bash -n tests/build/test-check-kernel-elf.sh` exit 0; `bash tests/build/test-check-kernel-elf.sh` PASS; `bash tests/build/test-check-kernel-elf-positive.sh` PASS; `bash tests/toolchain/test-verify-zig-release.sh` PASS (4 casos); `bash tests/toolchain/test-host-diagnostics.sh` PASS.
+NÃO EXECUTADO: Zig build, execução no Fedora, boot UEFI/QEMU, criação do repositório remoto, commits, tags ou releases.
+RISCO: testes ELF verificam propriedades superficiais; ELF malicioso ainda exige validação rigorosa no loader. O teste /bin/true é dependente do host, mas agora exige mensagem de erro do gate.
+PRÓXIMA AÇÃO EXATA: obter saída de `zig version`, `zig env` e `cat /etc/fedora-release` do Fedora; preparar build.zig para API instalada e executar compilação real.
+ACEITE M0.1: build freestanding real com Zig fixado, inspeção do artefato, hash e evidências reproduzíveis; ainda BLOQUEADO.
+ROLLBACK: restaurar a versão anterior de tests/build/test-check-kernel-elf.sh; alteração local reversível.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — CONTINUAÇÃO 012 (HANDOFF FEDORA)
+Arquivos criados nesta iteração: tools/fedora-m01-report.sh e tests/toolchain/test-fedora-m01-report.sh.
+Finalidade: produzir inventário somente leitura, com delimitadores estáveis, sem coletar `zig env` nem caminhos pessoais.
+VALIDAÇÃO REAL NO CONTÊINER: `bash -n tools/*.sh tests/toolchain/*.sh` exit 0; `bash tests/toolchain/test-fedora-m01-report.sh` PASS; `bash tools/fedora-m01-report.sh` exit 0, machine=x86_64, zig=NOT_FOUND, qemu-system-x86_64=NOT_FOUND, ovmf_rpm=RPM_NOT_AVAILABLE. O host NÃO é o Fedora do responsável.
+NÃO EXECUTADO: Zig build, compilação freestanding, testes QEMU, execução no Fedora, criação de repositório remoto, commits e tags.
+PRÓXIMA AÇÃO: responsável executa `bash tools/fedora-m01-report.sh` no Fedora e retorna a saída; somente então validar a toolchain real e a API de build. M0.1 ABERTA.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — CONTINUAÇÃO 013 (AUDITORIA E RETESTE)
+ESCOPO: inspeção da árvore local e execução integral dos testes auxiliares existentes; nenhum subsistema novo criado.
+VALIDAÇÃO REAL NESTA SESSÃO: `bash -n` em tools/*.sh, tests/toolchain/*.sh e tests/build/*.sh: exit 0; cinco scripts de teste executados: test-fedora-m01-report.sh PASS, test-host-diagnostics.sh PASS, test-verify-zig-release.sh PASS (4 negativos), test-check-kernel-elf-positive.sh PASS (fixture GNU), test-check-kernel-elf.sh PASS (negativos).
+AMBIENTE: Zig não encontrado no PATH; diretório AzuraOS não contém repositório Git local (`git status` retornou 128). Nenhum resultado do Fedora foi fornecido. A versão Zig e o checksum anteriormente registrados permanecem referências documentadas, não foram revalidados nesta sessão.
+NÃO EXECUTADO: compilação Zig, build freestanding, boot UEFI/QEMU, teste no Fedora, comparação de hashes de builds, commit, criação de repositório remoto ou tag.
+RISCO/PENDÊNCIA: sem a saída do diagnóstico do Fedora não é possível certificar a toolchain principal. Evitar novos testes auxiliares sem necessidade. Próxima ação: responsável executar `bash tools/fedora-m01-report.sh` no Fedora e enviar saída; validar Zig instalado e API de build antes de implementar build.zig.
+STATUS: M0.1 aberta; nenhum componente de boot ou kernel comprovadamente funcional.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — CONTINUAÇÃO 014 (GIT LOCAL)
+OBJETIVO: estabelecer controle de versão local sem publicação remota.
+IMPLEMENTADO: inicializado repositório Git local na branch main; criado .gitignore para caches, artefatos de compilação e arquivos locais. Nenhuma identidade Git configurada e nenhum commit criado.
+VALIDAÇÃO NESTA SESSÃO: testes Bash em tests/toolchain/*.sh e tests/build/*.sh executados (ver saída do ciclo); git status e git branch inspecionados. Não houve compilação Zig nem execução Fedora/QEMU.
+PENDÊNCIA: obter diagnóstico do Fedora para fixar toolchain real; decidir criação remota por interface GitHub que exponha create repository.
+ROLLBACK: excluir somente .git e .gitignore locais, preservando os arquivos de projeto.
+
+ATUALIZAÇÃO M0.1 — 2026-10-18 — CONTINUAÇÃO 015 (GATE DE VALIDAÇÃO)
+ALTERAÇÕES: apenas este registro em docs/STATUS.txt; nenhuma alteração em código, build ou configuração externa.
+VALIDAÇÃO REAL NESTA SESSÃO: bash -n em todos os scripts de tools/, tests/toolchain/ e tests/build/: PASS; executados os cinco scripts de teste existentes: todos PASS. O teste ELF positivo utiliza fixture GNU, não um kernel Zig. git diff --check: PASS (não inspeciona arquivos ainda não rastreados).
+AMBIENTE: Zig ausente do PATH do contêiner; resultados do Fedora do responsável não fornecidos. Nenhuma compilação Zig, build freestanding, execução QEMU, commit ou publicação remota.
+CONTINUIDADE: solicitar saída do diagnóstico Fedora; não prosseguir com build.zig até verificar a toolchain/API. M0.1 ABERTA. Repositório Git local main sem commits; remoto não criado; tags e releases ausentes.
+
+ATUALIZAÇÃO M0.1 — 2026-10-19 — DIAGNÓSTICO FEDORA E PROBE ZIG
+EVIDÊNCIA FORNECIDA PELO RESPONSÁVEL: Fedora 44 x86_64; Zig 0.17.0 encontrado; QEMU ausente; edk2-ovmf ausente; readelf, git, sha256sum e file encontrados. Cinco testes auxiliares reportaram PASS no Fedora. Os quatro testes negativos SHA não verificam a procedência do Zig instalado.
+CRIADO: src/probe/main.zig e tools/build-m01-probe.sh para tentativa de compilar um ELF64 freestanding com Zig 0.17.0. O probe não é kernel inicializável e não tem integração UEFI.
+VALIDAÇÃO LOCAL: somente sintaxe Bash e integridade do ZIP; Zig indisponível no ambiente desta sessão, portanto build e compatibilidade com Zig 0.17.0 NÃO VERIFICADOS.
+PRÓXIMO GATE: executar bash tools/build-m01-probe.sh no Fedora e retornar saída integral; corrigir erros observados antes de declarar M0.1 aceita. QEMU/OVMF são necessários em etapas futuras de boot, não para este probe.
+
+ATUALIZAÇÃO M0.1 — 2026-10-19 — CONTINUAÇÃO 018 (PROBE ELF VALIDADO NO FEDORA)
+EVIDÊNCIA DO RESPONSÁVEL: `bash tools/build-m01-probe.sh` executou com êxito no Fedora 44 x86_64 usando Zig 0.17.0. O arquivo `zig-out/azura-m01-probe.elf` foi identificado como ELF64 x86_64 estático ET_EXEC, stripped; entry point 0x10011ac; verificador ELF PASS (PT_LOAD presente; sem PT_INTERP/PT_DYNAMIC). SHA-256 reportado: e247dee4009e1572031198b3506ff4ae9acef581dbb6cd04c455d6a62387a95a.
+INTERPRETAÇÃO: prova de compilação freestanding e validação estrutural do ELF; NÃO demonstra boot, execução do probe, UEFI ou kernel funcional.
+CRIADO: tools/check-m01-rebuild.sh para comparar dois builds sucessivos no mesmo host; ainda NÃO executado no Fedora. Comparação não equivale a reprodutibilidade hermética.
+VALIDAÇÃO NESTA SESSÃO: sintaxe Bash e integridade do ZIP. Sem Zig local para executar a comparação.
+PENDÊNCIAS: build.zig, kernel, bootloader, QEMU/OVMF, remoto GitHub e teste de boot. M0.1 ABERTA.
+
+ATUALIZAÇÃO M0.1 — 2026-10-19 — CONTINUAÇÃO 019 (BUILD.ZIG INTEGRADO, NÃO VALIDADO)
+EVIDÊNCIA RECEBIDA: responsável executou tools/check-m01-rebuild.sh no Fedora 44 com Zig 0.17.0; dois builds consecutivos reportaram SHA-256 idêntico e247dee4009e1572031198b3506ff4ae9acef581dbb6cd04c455d6a62387a95a e PASS. Isso comprova repetibilidade local da prova freestanding, não reprodutibilidade entre hosts.
+IMPLEMENTADO: build.zig com passos `probe` e `rebuild-check`, reutilizando os scripts já testados no Fedora. Não há kernel inicializável nem bootloader UEFI.
+VALIDAÇÃO DESTA ENTREGA: estrutura ZIP e presença dos arquivos; build.zig NÃO compilado nesta sessão porque Zig não está disponível no ambiente local. A API std.Build deve ser verificada pelo responsável em Zig 0.17.0.
+PRÓXIMO GATE: no Fedora, executar `zig build probe` e `zig build rebuild-check`, reportar a saída completa (inclusive erros). M0.1 ABERTA.
+
+ATUALIZAÇÃO M0.1 — 2026-10-19 — CONTINUAÇÃO 020 (BUILD.ZIG VALIDADO E PROTÓTIPO KERNEL)
+EVIDÊNCIA RECEBIDA DO FEDORA: `zig build probe` e `zig build rebuild-check` concluíram sem erro em Zig 0.17.0. ELF64 ET_EXEC estático validado, sem PT_INTERP/PT_DYNAMIC; dois builds idênticos SHA-256 e247dee4009e1572031198b3506ff4ae9acef581dbb6cd04c455d6a62387a95a. O build.zig é funcional para os passos existentes, que delegam a scripts Bash.
+CRIADO NESTA ENTREGA: src/kernel/main.zig, src/kernel/arch/x86_64/cpu.zig, tools/build-m01-kernel-elf.sh e passo `zig build kernel-elf`. O código separa entrada genérica e primitiva x86_64 PAUSE; não tem linker script, protocolo de boot, inicialização de CPU, mapa de memória ou drivers.
+VALIDAÇÃO LOCAL: bash -n no script novo e integridade do ZIP. Sem Zig local; compilação do novo protótipo NÃO TESTADA. O protótipo não é inicializável e não deve ser executado diretamente no Linux.
+PRÓXIMO GATE: `zig build kernel-elf` no Fedora e envio da saída; se PASS, projetar contrato de boot UEFI antes de testar QEMU. M0.1 ABERTA.
+
+ATUALIZAÇÃO M1 — 2026-10-20 — BOOT UEFI x86_64 COM LOG SERIAL (CONCLUÍDO)
+OBJETIVO: primeira tarefa do agente — auditar ambiente, propor ADR-0001, gerar
+estrutura mínima do repositório, implementar boot UEFI x86_64 mínimo com log
+serial verificável em QEMU, documentar build/teste exatos e apresentar evidências.
+
+AUDITORIA DE AMBIENTE (executada nesta sessão, host real Fedora 44 x86_64):
+  Zig 0.17.0 em /home/matheus/.local/bin/zig (lib em /home/matheus/.local/opt/zig/0.17.0).
+  QEMU 10.2.2 presente (contradiz STATUS anterior: "QEMU ausente" era do contêiner, não do Fedora).
+  OVMF presente: /usr/share/edk2/ovmf/OVMF_CODE.fd e OVMF_VARS.fd (edk2-ovmf-20260812).
+  mtools 4.0.49 presente. binutils (readelf/objcopy) presente. Sem nasm, sem sbsign.
+  Nenhuma dependência de runtime é ligada no kernel ou no bootloader.
+
+IMLEMENTADO NESTA ETAPA:
+  boot/uefi/         bootloader UEFI (PE/COFF, x86_64-uefi): log COM1, splash GOP,
+                     leitor de arquivo no ESP, parser ELF64 estrito, mapa de memória,
+                     alocação de pilha, transferência de controle para o kernel.
+  kernel/            kernel freestanding (ELF64, x86_64-freestanding): validação do
+                     protocolo de boot, IDT com relato de exceções da CPU, log do
+                     mapa de memória e do framebuffer, parada controlada (cli;hlt).
+  shared/            boot_info.zig (ABI do protocolo, compilado nos dois artefatos) e
+                     com1.zig (driver serial compartilhado).
+  kernel/linker.ld   fixa o kernel em 0x100000 (1 MiB); ver ADR-0003.
+  build.zig          grafo de build com os passos bootloader, kernel, esp, boot,
+                     unit-test, boot-test, fault-test, test (probe e rebuild-check M0.1 mantidos).
+  build.zig.zon      manifesto do pacote (Zig 0.17.0, sem dependências).
+  tools/             make-esp.sh, run-qemu-m1.sh, qemu-screenshot.py, ppm-to-png.py.
+  tests/boot/        test-m1-boot.sh e test-m1-fault-handler.sh (timeout + exit code).
+
+VALIDAÇÃO REAL EXECUTADA NESTA SESSÃO (todos os comandos abaixo rodaram):
+  zig build                                  -> OK, 2 artefatos.
+  bash tools/check-kernel-elf.sh <kernel>    -> PASS: ELF64 x86_64 ET_EXEC, PT_LOAD
+                                                presente, sem PT_INTERP/PT_DYNAMIC.
+  zig build unit-test                        -> 9 testes, todos PASS.
+  zig build esp                              -> imagem FAT 64 MiB com EFI/BOOT/BOOTX64.EFI
+                                                e azura-kernel.elf.
+  bash tools/run-qemu-m1.sh                  -> boot COMPLETO; log serial integral em
+                                                zig-out/boot/serial.log; screenshot PPM+PNG.
+  bash tests/boot/test-m1-boot.sh            -> PASS (exit 0).
+  bash tests/boot/test-m1-fault-handler.sh   -> PASS (exit 0).
+
+MÉTRICAS MEDIDAS:
+  bootloader .efi  64000 bytes   sha256 4d76c2d55455717fc1b75250222fdfa2210f7ecee23191756bf4a921e8b6b605
+  kernel .elf      17216 bytes   sha256 7f54e881aef1d84df1eb847a0a972fe394e5574a171347da541b074867fbb867
+  framebuffer      1280x800, stride 1280, 4096000 bytes, base 0x80000000, máscaras BGRX.
+  memória          86 entradas no mapa final; 463 MiB de memória convencional.
+  pilha do kernel  16384 bytes, top 0x1dff5018.
+  boot_info        136 bytes, versão de protocolo 1.
+  NÃO MEDIDO: tempo de boot (o log não tem timestamps) e latência de syscall
+  (não existem syscalls nesta etapa). Nada é afirmado sobre esses números.
+
+BUGS ENCONTRADOS E CORRIGIDOS DURANTE A ETAPA (relevantes para revisão futura):
+  1. collectSegments devolvia um slice de um array local: ponteiro pendurado para
+     memória de pilha morta. O parser devolvia lixo nos segmentos 2 e 3. Corrigido
+     com buffer fornecido pelo chamador; teste unitário adicionado.
+  2. A primeira tentativa de link do kernel usou o padrão do Zig (0x1000000 = 16 MiB),
+     que na OVMF é memória de scratch do firmware (boot_services_data). O
+     bootloader recusou o carregamento. Corrigido com kernel/linker.ld (1 MiB) e
+     verificação do mapa de memória (ADR-0003).
+  3. mformat -F criava FAT32 inválido em imagem de 64 MiB; a OVMF não montava o
+     volume. Removido o -F para o mtools escolher FAT16.
+
+LIMITAÇÕES CONHECIDAS (declaradas, não escondidas):
+  - O kernel roda sobre o GDT e as tabelas de página do firmware e NÃO chama
+    ExitBootServices. Assumir a máquina é trabalho de M2.
+  - Endereço de carga do kernel é fixo em 0x100000 e validado contra o mapa de
+    memória; não é reservado via AllocatePages.
+  - Interrupções de hardware não são tratadas; o kernel roda com IF=0 e a IDT
+    cobre apenas exceções da CPU (vetores 0-31).
+  - Não há userland, sistema de arquivos, drivers, escalonador nem desktop.
+  - Nenhuma execução em hardware real: tudo é x86_64 emulado com firmware OVMF.
+
+PENDÊNCIAS / PRÓXIMOS PASSOS (em ordem):
+  1. Decidir a licença do projeto (bloqueia a tag v0.1.0 e o badge de licença).
+  2. Inicializar o repositório Git local na branch main e criar o primeiro commit.
+  3. Revisão humana dos arquivos críticos: kernel/arch/x86_64/idt.zig,
+     boot/uefi/elf_loader.zig, shared/boot_info.zig, kernel/linker.ld.
+  4. M2: GDT próprio, tabelas de página próprias, ExitBootServices, alocador de
+     memória física, heap do kernel, timer, drivers de serial e framebuffer.
+  5. Publicação remota (github.com/CeoMatheusDev/AzuraOS) apenas com autorização
+     e acesso válidos; nenhuma tag ou release foi criada nesta etapa.
+
+ROLLBACK: esta etapa só criou e alterou arquivos do repositório local. Nenhuma
+configuração externa, nenhum repositório remoto, nenhuma tag e nenhuma release.

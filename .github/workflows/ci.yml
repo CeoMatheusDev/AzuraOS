@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test (x86_64, Fedora)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:44
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          dnf install -y \
+            zig \
+            qemu-system-x86 \
+            edk2-ovmf \
+            mtools \
+            binutils \
+            file \
+            coreutils \
+            findutils \
+            python3 \
+            tar \
+            xz
+          echo "zig version: $(zig version)"
+
+      - name: Report the toolchain
+        run: |
+          bash tools/fedora-m01-report.sh || true
+          bash tools/check-toolchain.sh || true
+
+      - name: Build both artifacts
+        run: zig build
+
+      - name: Run the unit tests
+        run: zig build unit-test
+
+      - name: Run the toolchain tests
+        run: |
+          bash tests/toolchain/test-verify-zig-release.sh
+          bash tests/toolchain/test-host-diagnostics.sh
+          bash tests/toolchain/test-fedora-m01-report.sh
+          bash tests/build/test-check-kernel-elf.sh
+          bash tests/build/test-check-kernel-elf-positive.sh
+
+      - name: Run the QEMU boot test
+        run: zig build boot-test
+
+      - name: Run the QEMU fault handler test
+        run: zig build fault-test
+
+      - name: Upload the boot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m1-boot-evidence
+          path: |
+            zig-out/boot/serial.log
+            zig-out/boot/screen.png
+            zig-out/test-boot/
+            zig-out/test-fault/
+          if-no-files-found: warn
+
+  formatting:
+    name: zig fmt
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:44
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig
+        run: dnf install -y zig
+      - name: Check the formatting
+        run: |
+          zig fmt --check boot kernel shared tools
