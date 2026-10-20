@@ -12,6 +12,10 @@
 *.iso
 *.log
 
+# Python bytecode from the helper scripts
+__pycache__/
+*.pyc
+
 # Local environment and editor state
 .env
 .env.*

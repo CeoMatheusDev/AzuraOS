@@ -26,6 +26,12 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("shared/com1.zig"),
     });
 
+    // Framebuffer verification, shared so both stages compute the same
+    // checksum over the same pixels.
+    const framebuffer_module = b.addModule("framebuffer", .{
+        .root_source_file = b.path("shared/framebuffer.zig"),
+    });
+
     // ------------------------------------------------------------------
     // Stage 1: UEFI bootloader
     // ------------------------------------------------------------------
@@ -40,6 +46,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "shared", .module = shared_module },
             .{ .name = "com1", .module = com1_module },
+            .{ .name = "framebuffer", .module = framebuffer_module },
         },
     });
 
@@ -73,6 +80,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "shared", .module = shared_module },
             .{ .name = "com1", .module = com1_module },
+            .{ .name = "framebuffer", .module = framebuffer_module },
             .{ .name = "build_options", .module = kernel_options.createModule() },
         },
     });
@@ -145,16 +153,29 @@ pub fn build(b: *std.Build) void {
     // Tests
     // ------------------------------------------------------------------
 
+    // The standard target options may only be requested once per build.
+    const host_target = b.standardTargetOptions(.{});
+
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("boot/uefi/elf_loader.zig"),
-            .target = b.standardTargetOptions(.{}),
+            .target = host_target,
+            .optimize = .Debug,
+        }),
+    });
+
+    const shared_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("shared/framebuffer.zig"),
+            .target = host_target,
             .optimize = .Debug,
         }),
     });
     const unit_test_run = b.addRunArtifact(unit_tests);
+    const shared_test_run = b.addRunArtifact(shared_tests);
     const unit_test_step = b.step("unit-test", "Run the host unit tests");
     unit_test_step.dependOn(&unit_test_run.step);
+    unit_test_step.dependOn(&shared_test_run.step);
 
     const boot_test = b.addSystemCommand(&.{ "bash", "tests/boot/test-m1-boot.sh" });
     boot_test.addArg(esp_image);

@@ -41,6 +41,12 @@ and the kernel reports the machine it found before halting.
 - `shared/boot_info.zig`: the normative boot protocol, compiled into both
   stages so a mismatch is a compile error.
 - `shared/com1.zig`: the serial driver, shared by both stages.
+- `shared/framebuffer.zig`: the framebuffer checksum, computed by the
+  bootloader over the pixels it painted and recomputed by the kernel after
+  the handover. The boot test asserts that the two values are equal, which
+  is the real proof that the framebuffer was written and survived the
+  handover; the QEMU `screendump` picture does not capture the GOP
+  framebuffer faithfully.
 - `build.zig`: the build graph, with the steps `bootloader`, `kernel`,
   `esp`, `boot`, `unit-test`, `boot-test`, `fault-test` and `test`.
 - `tools/make-esp.sh`: builds the FAT EFI System Partition image.

@@ -106,6 +106,21 @@ if ! grep -q -E "^\[azura\] framebuffer: [0-9]+x[0-9]+" "$serial_log"; then
   failures=$((failures + 1))
 fi
 
+# The framebuffer checksum is computed by the bootloader over the pixels it
+# wrote and recomputed by the kernel after the handover. Equal values prove
+# that the kernel sees exactly the framebuffer the bootloader left behind.
+bootloader_sum=$(grep -m1 -F "[azura] framebuffer checksum: " "$serial_log" | awk '{print $NF}' || true)
+kernel_sum=$(grep -F "[azura] framebuffer checksum: " "$serial_log" | tail -n1 | awk '{print $NF}' || true)
+if [[ -z "$bootloader_sum" || -z "$kernel_sum" ]]; then
+  echo "FAIL: the framebuffer checksum is missing from the log" >&2
+  failures=$((failures + 1))
+elif [[ "$bootloader_sum" != "$kernel_sum" ]]; then
+  echo "FAIL: the framebuffer checksums differ" >&2
+  echo "      bootloader: $bootloader_sum" >&2
+  echo "      kernel:     $kernel_sum" >&2
+  failures=$((failures + 1))
+fi
+
 if [[ $failures -ne 0 ]]; then
   echo "FAIL: $failures check(s) failed" >&2
   echo "--- serial log ---" >&2

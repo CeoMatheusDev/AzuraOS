@@ -16,6 +16,7 @@
 const std = @import("std");
 const shared = @import("shared");
 const com1 = @import("com1");
+const shared_framebuffer = @import("framebuffer");
 const build_options = @import("build_options");
 
 const cpu = @import("arch/x86_64/cpu.zig");
@@ -63,7 +64,6 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
 
     printMemoryMap(boot_info);
     printFramebuffer(boot_info);
-    experimentReadBack(boot_info);
 
     // From this point on a CPU fault is reported instead of rebooting the
     // machine.
@@ -127,23 +127,6 @@ fn printMemoryMap(boot_info: *shared.boot_info) void {
     }
 }
 
-/// EXPERIMENT: read the framebuffer back and report what the kernel sees.
-fn experimentReadBack(boot_info: *shared.boot_info) void {
-    const fb = boot_info.framebuffer;
-    if (fb.base == 0 or fb.size == 0) return;
-    const pixels: [*]const u32 = @ptrFromInt(fb.base);
-    const ys = [_]u32{ 0, 100, 200, 207, 208, 300, 500, 799 };
-    for (ys) |y| {
-        const offset = @as(u64, y) * fb.stride / 4;
-        const value = pixels[@intCast(offset)];
-        com1.print("[azura] EXPERIMENT readback y={d}: raw=0x{x} r={d} g={d} b={d}\n", .{
-            y, value, (value & fb.red_mask) >> @intCast(@ctz(fb.red_mask)),
-            (value & fb.green_mask) >> @intCast(@ctz(fb.green_mask)),
-            (value & fb.blue_mask) >> @intCast(@ctz(fb.blue_mask)),
-        });
-    }
-}
-
 /// Print the framebuffer geometry handed over by the bootloader.
 fn printFramebuffer(boot_info: *shared.boot_info) void {
     if (boot_info.framebuffer_present == 0) {
@@ -163,4 +146,10 @@ fn printFramebuffer(boot_info: *shared.boot_info) void {
         fb.green_mask,
         fb.blue_mask,
     });
+
+    // The same checksum the bootloader computed over the pixels it wrote.
+    // The automated test compares the two values, which proves that the
+    // kernel sees exactly the framebuffer the bootloader left behind.
+    const sum = shared_framebuffer.checksum(fb.base, fb.stride, fb.height);
+    com1.print("[azura] framebuffer checksum: 0x{x}\n", .{sum});
 }

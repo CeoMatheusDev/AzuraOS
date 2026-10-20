@@ -3,8 +3,9 @@ Data UTC: 2026-10-20 (data da atualização; hora não aferida)
 Projeto: AzuraOS
 Versão planejada: 0.1.0 (marco interno M0+M1); versão/tag publicada: nenhuma
 Arquitetura: x86_64 / UEFI; AArch64 e RISC-V futuros, não suportados
-Branch: nenhuma; repositório Git local NÃO inicializado neste diretório
-Último commit verificado: nenhum
+Branch: main; repositório Git inicializado e publicado pelo responsável durante
+         a sessão (origin = https://github.com/CeoMatheusDev/AzuraOS.git)
+Último commit verificado: 3db147f "chore: ignore generated files and build artifacts"
 Última tag publicada: nenhuma
 Zig version: 0.17.0 VERIFICADA no Fedora 44 (zig version -> 0.17.0)
 QEMU: 10.2.2 VERIFICADO; OVMF: edk2-ovmf-20260812 VERIFICADO
@@ -210,6 +211,8 @@ MÉTRICAS MEDIDAS:
   memória          86 entradas no mapa final; 463 MiB de memória convencional.
   pilha do kernel  16384 bytes, top 0x1dff5018.
   boot_info        136 bytes, versão de protocolo 1.
+  framebuffer      checksum FNV-1a 0xd43a1e5ec0808a0d, idêntico no bootloader e
+                   no kernel (verificado pelo teste automatizado).
   NÃO MEDIDO: tempo de boot (o log não tem timestamps) e latência de syscall
   (não existem syscalls nesta etapa). Nada é afirmado sobre esses números.
 
@@ -223,6 +226,18 @@ BUGS ENCONTRADOS E CORRIGIDOS DURANTE A ETAPA (relevantes para revisão futura):
      verificação do mapa de memória (ADR-0003).
   3. mformat -F criava FAT32 inválido em imagem de 64 MiB; a OVMF não montava o
      volume. Removido o -F para o mtools escolher FAT16.
+  4. O comando de monitor "screendump" do QEMU NÃO captura fielmente o
+     framebuffer GOP do dispositivo de vídeo emulado: devolve uma superfície
+     que mostra só as primeiras linhas do que o guest escreveu, misturadas com
+     a renderização de texto do firmware. Diagnóstico: o kernel leu de volta os
+     pixels nas linhas 0, 100, 200, 207, 208, 300, 500 e 799 e encontrou o valor
+     escrito pelo bootloader em todas elas. Solução adotada: verificação por
+     CHECKSUM, não por imagem. shared/framebuffer.zig calcula um FNV-1a de 64 bits
+     sobre cada 16a linha; o bootloader imprime o valor após pintar o splash e o
+     kernel recalcula após a passagem de controle; o teste automatizado exige
+     que os dois valores sejam IGUAIS. Isso prova que o kernel enxerga
+     exatamente o framebuffer que o bootloader deixou, o que é mais forte que
+     qualquer screenshot.
 
 LIMITAÇÕES CONHECIDAS (declaradas, não escondidas):
   - O kernel roda sobre o GDT e as tabelas de página do firmware e NÃO chama
@@ -236,7 +251,11 @@ LIMITAÇÕES CONHECIDAS (declaradas, não escondidas):
 
 PENDÊNCIAS / PRÓXIMOS PASSOS (em ordem):
   1. Decidir a licença do projeto (bloqueia a tag v0.1.0 e o badge de licença).
-  2. Inicializar o repositório Git local na branch main e criar o primeiro commit.
+  2. (FEITO PELO RESPONSAVEL DURANTE A SESSÃO) repositório Git inicializado na
+     branch main e publicado em origin/main. Os commits do responsável capturaram
+     o código experimental de diagnóstico do framebuffer; a árvore de trabalho
+     atual remove os marcadores "EXPERIMENT" e acrescenta a verificação por
+     checksum. Commit local pendente de revisão, SEM push (sem autorização).
   3. Revisão humana dos arquivos críticos: kernel/arch/x86_64/idt.zig,
      boot/uefi/elf_loader.zig, shared/boot_info.zig, kernel/linker.ld.
   4. M2: GDT próprio, tabelas de página próprias, ExitBootServices, alocador de

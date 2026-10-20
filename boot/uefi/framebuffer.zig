@@ -6,7 +6,6 @@
 //! geometry to the kernel through `boot_info.framebuffer`.
 
 const std = @import("std");
-const com1 = @import("com1");
 const uefi = std.os.uefi;
 const shared = @import("shared");
 
@@ -113,15 +112,6 @@ pub fn drawSplash(info: Info) void {
     if (info.width == 0 or info.height == 0) return;
 
     const pixels: [*]u32 = @ptrFromInt(info.base);
-
-    // EXPERIMENT: solid fill
-    {
-        const solid = info.packPixel(255, 0, 0);
-        var yy: u32 = 0;
-        while (yy < info.height) : (yy += 1) fillRow(pixels, info, yy, solid);
-        com1.print("[azura] EXPERIMENT: filled {d} rows of {d}, stride {d}, size {d}, base 0x{x}\n", .{ info.height, info.width, info.stride, info.size, info.base });
-        return;
-    }
 
     // Background: vertical gradient from deep blue to near black.
     var y: u32 = 0;

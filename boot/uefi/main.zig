@@ -21,6 +21,7 @@ const console = @import("console.zig");
 const elf_loader = @import("elf_loader.zig");
 const framebuffer = @import("framebuffer.zig");
 const com1 = @import("com1");
+const shared_framebuffer = @import("framebuffer");
 
 /// Name of the kernel image inside the EFI System Partition.
 const kernel_file_name = "azura-kernel.elf";
@@ -160,6 +161,15 @@ pub fn main() void {
         framebuffer.drawSplash(fb);
     }
     console.print("AzuraOS: handing over to the kernel\n", .{});
+
+    // The checksum of the framebuffer as it is now. It is computed after
+    // every write, including the console text above, because the console
+    // draws into the same framebuffer. The kernel recomputes it after the
+    // handover and the automated test compares the two values.
+    if (framebuffer_info) |fb| {
+        const sum = shared_framebuffer.checksum(fb.base, fb.stride, fb.height);
+        com1.print("[azura] framebuffer checksum: 0x{x}\n", .{sum});
+    }
 
     jump_arguments = .{
         .entry = loaded.entry,

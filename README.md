@@ -67,7 +67,8 @@ zig build boot
 `zig build boot` leaves the evidence in `zig-out/boot/`:
 
 * `serial.log` — the COM1 capture of the whole boot,
-* `screen.ppm` / `screen.png` — a screenshot of the graphical console.
+* `screen.ppm` / `screen.png` — a screenshot of the graphical console (an
+  illustration; the framebuffer proof is the checksum in the serial log).
 
 ## Tests
 
@@ -97,9 +98,18 @@ The expected boot log, produced by the current artifacts, is:
 [azura] boot protocol: version 1, 136 bytes
 [azura] conventional memory: 463 MiB
 [azura] framebuffer: 1280x800 stride=1280 base=0x80000000 size=4096000
+[azura] framebuffer checksum: 0xd43a1e5ec0808a0d
 [azura] IDT installed, exception handling active
 [azura] boot complete, halting
 ```
+
+The framebuffer checksum is computed by the bootloader over the pixels it
+painted and recomputed by the kernel after the handover. The boot test
+asserts that the two values are equal, which proves that the kernel sees
+exactly the framebuffer the bootloader left behind. This is used instead of
+a screenshot, because the QEMU `screendump` monitor command does not
+faithfully capture the GOP framebuffer of the emulated video device (see
+`docs/testing/m1-boot-evidence.md`).
 
 ## Repository layout
 
