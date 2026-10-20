@@ -330,6 +330,27 @@ PRÓXIMOS PASSOS DE M2 (na ordem do plano acordado):
   M2.7  Drivers de serial e framebuffer sem dependência do firmware.
   M2.8  Regressão: o M1 continua funcional.
 
+ATUALIZAÇÃO M2.1 — 2026-10-20 — PRIMEIRA EXECUÇÃO REAL DO CI
+PUBLICAÇÃO: branch feat/m2-kernel-ownership publicada em
+origin/feat/m2-kernel-ownership; PR #1 aberto contra main
+(https://github.com/CeoMatheusDev/AzuraOS/pull/1). main permanece em 548388e.
+
+ACHADO REAL: a primeira execução do CI no GitHub Actions FALHOU, e a causa foi
+um defeito real do próprio CI, não do kernel. O workflow instalava o pacote
+"zig" do Fedora 44, que é a versão 0.16.0, enquanto o projeto exige 0.17.0
+exatamente (docs/TOOLCHAIN.md). Com 0.16.0 o build parava em
+"invalid builtin function: '@backingInt'".
+
+DUAS CORRECOES:
+  1. O CI agora baixa o Zig 0.17.0 oficial, confere o SHA-256 com
+     tools/verify-zig-release.sh, o mesmo script que o desenvolvedor usa, e
+     falha se "zig version" não for 0.17.0. O pacote da distribuição deixou
+     de ser usado.
+  2. O código deixou de usar @backingInt, que foi removido no Zig 0.16, e
+     passou a usar @intFromEnum. Não há nenhum ganho em depender de um
+     builtin obsoleto, e assim o código não fica preso a uma versão sem
+     necessidade.
+
 LIMITAÇÕES CONHECIDAS:
   - O kernel ainda usa as tabelas de página do firmware e não chamou
     ExitBootServices (M2.2).

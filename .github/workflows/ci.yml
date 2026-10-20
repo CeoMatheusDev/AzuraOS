@@ -2,13 +2,21 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**', 'docs/**']
   pull_request:
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # The exact toolchain the project is validated against. The distribution
+  # package is NOT used: the Fedora 44 package is Zig 0.16.0, and the project
+  # requires 0.17.0 exactly (see docs/TOOLCHAIN.md).
+  ZIG_VERSION: '0.17.0'
+  ZIG_ARCHIVE: zig-x86_64-linux-0.17.0.tar.xz
+  ZIG_URL: https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz
 
 jobs:
   build-and-test:
@@ -21,10 +29,9 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v4
 
-      - name: Install the toolchain
+      - name: Install the system packages
         run: |
           dnf install -y \
-            zig \
             qemu-system-x86 \
             edk2-ovmf \
             mtools \
@@ -34,8 +41,31 @@ jobs:
             findutils \
             python3 \
             tar \
-            xz
+            xz \
+            curl \
+            ca-certificates
+
+      - name: Install Zig ${{ env.ZIG_VERSION }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o "$ZIG_ARCHIVE" "$ZIG_URL"
+          # The checksum comes from the official release index and is checked
+          # by the project's own script, so the CI and the developer use the
+          # same verification.
+          bash "$GITHUB_WORKSPACE/tools/verify-zig-release.sh" "$PWD/$ZIG_ARCHIVE"
+          tar -xf "$ZIG_ARCHIVE"
+          echo "$RUNNER_TEMP/zig-$ZIG_VERSION" >> "$GITHUB_PATH"
+          echo "ZIG_VERSION=$ZIG_VERSION" >> "$GITHUB_ENV"
+
+      - name: Check the toolchain
+        run: |
+          set -euo pipefail
           echo "zig version: $(zig version)"
+          if [[ "$(zig version)" != "$ZIG_VERSION" ]]; then
+            echo "ERROR: expected Zig $ZIG_VERSION, got $(zig version)" >&2
+            exit 1
+          fi
 
       - name: Report the toolchain
         run: |
@@ -81,8 +111,16 @@ jobs:
       image: fedora:44
     steps:
       - uses: actions/checkout@v4
-      - name: Install Zig
-        run: dnf install -y zig
+      - name: Install Zig ${{ env.ZIG_VERSION }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o "$ZIG_ARCHIVE" "$ZIG_URL"
+          bash "$GITHUB_WORKSPACE/tools/verify-zig-release.sh" "$PWD/$ZIG_ARCHIVE"
+          tar -xf "$ZIG_ARCHIVE"
+          echo "$RUNNER_TEMP/zig-$ZIG_VERSION" >> "$GITHUB_PATH"
       - name: Check the formatting
         run: |
+          set -euo pipefail
+          echo "zig version: $(zig version)"
           zig fmt --check boot kernel shared tools
