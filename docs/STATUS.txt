@@ -359,6 +359,17 @@ CORRECOES:
 CONSEQUENCIA: "zig fmt --check" passa a ser uma guarda real: foi ele que
 detectou a divergência de grafia na primeira execução do CI.
 
+RESULTADO: o CI PASSOU pela primeira vez, com execução real no GitHub Actions
+(workflow run 39511186005, PR #1). Evidência do log:
+  - "OK: SHA-256 matches Zig 0.17.0 official release index"
+  - "zig version: 0.17.0"
+  - os 5 scripts de toolchain/ELF: PASS
+  - "PASS: the M1 boot sequence completed in QEMU/OVMF"
+  - "PASS: the kernel exception handler reported the fault and halted the machine"
+  - "zig fmt --check": PASS
+O item "CI no GitHub Actions: sem execução confirmada" está RESOLVIDO: houve
+execução bem-sucedida, com os jobs "Build and test" e "zig fmt" verdes.
+
 LIMITAÇÕES CONHECIDAS:
   - O kernel ainda usa as tabelas de página do firmware e não chamou
     ExitBootServices (M2.2).

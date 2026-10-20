@@ -18,8 +18,9 @@ compatibility is claimed unless it has been demonstrated.
 | --------- | ----- | -------- |
 | M0 Engineering | done | `docs/STATUS.txt`, `docs/TOOLCHAIN.md`, reproducible build graph |
 | M1 Boot | done | `docs/testing/m1-boot-evidence.md` |
-| M2.1 Kernel GDT | in progress | `docs/adr/ADR-0004-kernel-gdt.md` |
-| M2.2 `ExitBootServices` | not started | — |
+| M2.1 Kernel GDT | done, PR #1 open | `docs/adr/ADR-0004-kernel-gdt.md` |
+| CI (GitHub Actions) | **passing** | run 39511186005 |
+| M2.2 `ExitBootServices` | not started | criteria in `docs/specs/m2.2-exitbootservices.md` |
 | M3 Execution | not started | — |
 
 The boot chain implemented today:
