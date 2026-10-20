@@ -9,8 +9,8 @@ Branch: main; repositório Git inicializado e publicado pelo responsável durant
 Última tag publicada: nenhuma
 Zig version: 0.17.0 VERIFICADA no Fedora 44 (zig version -> 0.17.0)
 QEMU: 10.2.2 VERIFICADO; OVMF: edk2-ovmf-20260812 VERIFICADO
-Estado geral: M1 CONCLUÍDO — boot UEFI x86_64 com log serial e framebuffer,
-              verificado em QEMU/OVMF. Evidência: docs/testing/m1-boot-evidence.md
+Estado geral: M1 CONCLUÍDO e M2.1 (GDT própria) EM ANDAMENTO no branch
+              feat/m2-kernel-ownership. Evidência M1: docs/testing/m1-boot-evidence.md
 
 OBJETIVO DA TAREFA
 M0.1: estabelecer requisitos de toolchain, estratégia de build reproduzível e inventário Fedora.
@@ -265,3 +265,75 @@ PENDÊNCIAS / PRÓXIMOS PASSOS (em ordem):
 
 ROLLBACK: esta etapa só criou e alterou arquivos do repositório local. Nenhuma
 configuração externa, nenhum repositório remoto, nenhuma tag e nenhuma release.
+
+
+ATUALIZAÇÃO M2.1 — 2026-10-20 — GDT PRÓPRIA DO KERNEL (EM ANDAMENTO)
+OBJETIVO: o kernel deixa de depender do GDT do firmware e passa a instalar o
+próprio, com seletor de código 0x08 e de dados 0x10.
+
+ESTADO: IMPLEMENTADO E VERIFICADO em QEMU/OVMF. Branch: feat/m2-kernel-ownership
+(main permanece a referência funcional do M1). Commit local, SEM push.
+
+IMPLEMENTADO:
+  kernel/arch/x86_64/gdt.zig  GDT do kernel: nulo, código 0x08 (long mode),
+                               dados 0x10, slot 0x18 reservado para a TSS e uma
+                               cópia do segmento de código no seletor que o
+                               firmware usava, para que a IDT instalada antes da
+                               troca continue válida durante a transição.
+  kernel/arch/x86_64/cpu.zig   leitura do IDTR e do GDTR de volta, extraindo os
+                               valores dentro do bloco de assembly.
+  kernel/arch/x86_64/idt.zig   verifyEntries: confere os bytes no endereço
+                               apontado por cada entrada da IDT.
+  kernel/main.zig              a IDT é instalada antes da troca do GDT (para
+                               que uma falha durante a troca seja reportada em
+                               vez de reiniciar a máquina) e reinstalada com o
+                               seletor 0x08 depois.
+  docs/adr/ADR-0004-kernel-gdt.md
+
+VALIDAÇÃO REAL EXECUTADA NESTA SESSÃO:
+  zig test kernel/arch/x86_64/gdt.zig            -> 6 testes, todos PASS.
+  zig build unit-test                             -> PASS (ELF, framebuffer, GDT).
+  zig build boot-test                             -> PASS (exit 0).
+  zig build fault-test                            -> PASS (exit 0).
+  O log de boot mostra: "GDT: code selector=0x8", "GDT active, the segments are
+  the kernel's own" e, na injeção de falha, "KERNEL FAULT: vector 6" com
+  cs=0x8 — a exceção é reportada com o GDT do kernel em uso.
+
+BUGS REAIS ENCONTRADOS NESTA ETAPA (relevantes para revisão futura):
+  1. Os nibbles do byte de flags do descritor de GDT estavam trocados: o limite
+     usava 0xfa/0xfc em vez de 0xaf/0xcf. O resultado era um limite de 44 MiB
+     em vez de 4 GiB. Como o kernel e a pilha abaixo de 44 MiB funcionam, o
+     boot passava e a falha só aparecia ao tomar uma exceção: o processador
+     empurrava o quadro da exceção na pilha do kernel, acima do limite, e a
+     máquina reiniciava em laço. Ver ADR-0004. Corrigido, com testes unitários
+     por nibble e um teste que calcula o limite efetivo.
+  2. Ler o IDTR/GDTR gravando num operando de memória e lendo essa memória do
+     Zig não é confiável: o compilador mantinha uma cópia separada do buffer e
+     devolvia a cópia, não o que o processador escreveu. Agora os valores são
+     extraídos dentro do próprio bloco de assembly.
+  3. O stub de exceção usava um operando de assembly que exigia um registrador;
+     o compilador emitia uma sequência de preparação e o endereço da função
+     "naked" passava a apontar para o meio do código gerado. O stub agora chama
+     o handler pelo símbolo exportado, e verifyEntries confere os bytes de cada
+     entrada no boot.
+  4. A tabela da IDT precisa estar alinhada em 16 bytes (Intel SDM); o
+     alinhamento agora é explícito.
+
+PRÓXIMOS PASSOS DE M2 (na ordem do plano acordado):
+  M2.2  ExitBootServices com a chave do mapa de memória, páginas reservadas e a
+       garantia de que código, pilha, tabelas e framebuffer permanecem
+       acessíveis.
+  M2.3  Gerenciador de memória física (frames) com alocação e liberação testadas.
+  M2.4  Paginação própria (PML4/PDPT/PD/PT), W^X, NX e page faults controlados.
+  M2.5  Heap do kernel com testes de alocação, fragmentação e limites.
+  M2.6  Timer: relógio monotônico e interrupções verificadas.
+  M2.7  Drivers de serial e framebuffer sem dependência do firmware.
+  M2.8  Regressão: o M1 continua funcional.
+
+LIMITAÇÕES CONHECIDAS:
+  - O kernel ainda usa as tabelas de página do firmware e não chamou
+    ExitBootServices (M2.2).
+  - Não há TSS ainda: o seletor 0x18 está reservado e o campo IST da IDT vale
+    zero, portanto uma falha na pilha do kernel ainda não tem uma pilha
+    alternativa.
+  - O teste continua sendo em x86_64 emulado; nada foi validado em hardware real.

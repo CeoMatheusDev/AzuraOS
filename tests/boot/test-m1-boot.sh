@@ -67,6 +67,7 @@ expected=(
   "[azura] boot protocol: version 1"
   "[azura] memory map:"
   "[azura] framebuffer:"
+  "[azura] GDT active, the segments are the kernel's own"
   "[azura] IDT installed, exception handling active"
   "[azura] boot complete, halting"
 )

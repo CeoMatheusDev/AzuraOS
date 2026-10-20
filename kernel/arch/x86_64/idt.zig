@@ -53,7 +53,12 @@ const vector_count = 256;
 /// Number of CPU exception vectors handled by the kernel.
 const exception_vector_count = 32;
 
-var table: [vector_count]Entry = @splat(.{
+/// The IDT table.
+///
+/// The Intel SDM requires the IDT base address to be aligned on a 16 byte
+/// boundary; the alignment is therefore explicit and not left to the
+/// linker.
+var table: [vector_count]Entry align(16) = @splat(.{
     .offset_low = 0,
     .selector = 0,
     .ist = 0,
@@ -80,21 +85,21 @@ var handler_address: usize = 0;
 
 /// Install the IDT.
 ///
+/// `code_selector` is the selector of the code segment the handlers run in.
+/// It must be a selector of the GDT that is currently installed; after the
+/// kernel installs its own GDT that is `gdt.kernel_code_selector`.
+///
 /// Must be called with interrupts disabled. After this call every CPU
 /// exception lands in `commonHandler` instead of escalating to a triple
 /// fault.
-pub fn install() void {
-    handler_address = @intFromPtr(&commonHandler);
-
-    // The firmware's code segment selector is reused so the kernel does not
-    // depend on a GDT layout it does not own yet.
-    const selector = cpu.codeSelector();
+pub fn install(code_selector: u16) void {
+    handler_address = @intFromPtr(&azuraCommonHandler);
 
     inline for (0..exception_vector_count) |vector| {
         const stub = makeStub(vector);
         table[vector] = .{
             .offset_low = @truncate(stub),
-            .selector = selector,
+            .selector = code_selector,
             .ist = 0,
             .type_attr = gate_type,
             .offset_middle = @truncate(stub >> 16),
@@ -118,11 +123,18 @@ pub fn install() void {
 /// Build the per-vector trampoline.
 ///
 /// Each vector needs its own stub because the CPU does not report which
-/// vector fired. The stub pushes the vector number and hands the CPU's stack
-/// frame to the common handler.
+/// vector fired. The stub hands the vector number and the pointer to the
+/// CPU's stack frame to the common handler.
+///
+/// The handler is reached through its exported symbol instead of through a
+/// pointer held in a register: an inline assembly operand that needs a
+/// register makes the compiler emit a setup sequence, and the address of a
+/// naked function that has one does not reliably point at the start of the
+/// generated code. The kernel verifies the resulting addresses at boot; see
+/// `verifyEntries`.
 ///
 /// The stub is a naked function so that the CPU's stack frame is still the
-/// top of the stack when `commonHandler` is entered: the handler reads
+/// top of the stack when the handler is entered: the handler reads
 /// RIP/CS/RFLAGS relative to that pointer.
 fn makeStub(comptime vector: u8) usize {
     const Stub = struct {
@@ -132,20 +144,70 @@ fn makeStub(comptime vector: u8) usize {
             asm volatile (
                 \\ movq %[v], %%rdi        // vector number
                 \\ movq %%rsp, %%rsi       // pointer to the CPU's stack frame
-                \\ movq %[handler], %%r11
-                \\ callq *%%r11
+                \\ callq azuraCommonHandler
                 :
                 : [v] "i" (vector_id),
-                  [handler] "{r11}" (handler_address),
                 : .{ .memory = true });
         }
     };
     return @intFromPtr(&Stub.stub);
 }
 
+/// Read the IDT register back, to prove which table the processor uses.
+pub fn readInstalledDescriptor() cpu.Descriptor {
+    return cpu.readIdt();
+}
+
+/// Read back the state of the installed table, for diagnostics.
+///
+/// The values are what the processor actually sees, not what the code
+/// believes it wrote.
+pub const Diagnostics = struct {
+    /// Address of the common handler.
+    handler: usize,
+    /// Address of the stub of the given vector.
+    stub: usize,
+    /// The raw entry of the given vector.
+    entry: Entry,
+};
+
+/// Collect the diagnostics of the installed table.
+pub fn diagnostics(comptime vector: u8) Diagnostics {
+    return .{
+        .handler = handler_address,
+        .stub = makeStub(vector),
+        .entry = table[vector],
+    };
+}
+
+/// Verify that every entry points at the beginning of its stub.
+///
+/// The first instruction of a stub is `movq $<vector>, %rdi`, encoded as
+/// `48 c7 c7 <vector> 00 00 00`. Reading those bytes at the address the IDT
+/// names proves that the entry points at the start of the stub and not into
+/// the middle of it, which is the failure mode this check exists for.
+///
+/// Returns the vector of the first entry that is wrong, or null when every
+/// entry is correct.
+pub fn verifyEntries() ?u8 {
+    inline for (0..exception_vector_count) |vector| {
+        const address = makeStub(vector);
+        const bytes: [*]const u8 = @ptrFromInt(address);
+        if (bytes[0] != 0x48 or bytes[1] != 0xc7 or bytes[2] != 0xc7) return @intCast(vector);
+        const immediate: u32 = @as(u32, bytes[3]) |
+            (@as(u32, bytes[4]) << 8) |
+            (@as(u32, bytes[5]) << 16) |
+            (@as(u32, bytes[6]) << 24);
+        if (immediate != vector) return @intCast(vector);
+    }
+    return null;
+}
+
 /// Common exception handler. Never returns: the machine is halted so the
 /// failure is visible in the serial log instead of restarting the boot.
-fn commonHandler(vector: u8, frame: *const Frame) callconv(.c) void {
+///
+/// Exported so that the per-vector stubs can call it by name.
+export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void {
     com1.print("[azura] KERNEL FAULT: vector {d} ({s})\n", .{
         vector,
         vectorName(vector),

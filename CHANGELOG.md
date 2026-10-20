@@ -11,7 +11,37 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `kernel/arch/x86_64/gdt.zig`: the GDT the kernel owns, with the null, the
+  kernel code segment (0x08), the kernel data segment (0x10), a reserved
+  slot for the TSS and a copy of the code segment at the selector the
+  firmware was using, so the IDT installed before the switch stays valid
+  during the transition.
+- `kernel/arch/x86_64/cpu.zig`: `readIdt` and the GDTR/IDTR read backs, which
+  extract the values inside the assembly block. Writing them into a memory
+  operand and reading that memory from Zig is not reliable: the compiler
+  may keep a separate copy of the buffer and hand the caller the copy
+  instead of what the processor wrote.
+- `kernel/arch/x86_64/idt.zig`: `verifyEntries`, which reads the bytes at
+  the address every IDT entry names and checks that they are the beginning
+  of the matching stub.
+- `docs/adr/ADR-0004-kernel-gdt.md`: the GDT decision, with the descriptor
+  layout and the failure that motivated the checks.
+
+### Changed
+
+- The kernel no longer runs on the GDT built by the firmware. The IDT is
+  installed first with the selector that is active at that moment, so a
+  fault during the switch is reported instead of rebooting the machine, and
+  the IDT is reinstalled with the kernel's own selector afterwards.
+- The exception stubs call the handler through its exported symbol instead of
+  through a pointer held in a register: an inline assembly operand that
+  needs a register makes the compiler emit a setup sequence, and the address
+  of a naked function that has one does not reliably point at the start of
+  the generated code.
+- The IDT table is explicitly aligned on 16 bytes, as the Intel SDM
+  requires.
 
 ## [0.1.0] — 2026-10-20
 

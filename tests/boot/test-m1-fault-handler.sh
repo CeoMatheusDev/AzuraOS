@@ -63,6 +63,12 @@ serial_log="$normalized"
 
 failures=0
 
+# The exception must be reported while the kernel is running on its own GDT.
+if ! grep -q -F "[azura] GDT active, the segments are the kernel's own" "$serial_log"; then
+  echo "FAIL: the kernel did not install its own GDT" >&2
+  failures=$((failures + 1))
+fi
+
 if ! grep -q -F "[azura] KERNEL FAULT: vector 6 (invalid opcode)" "$serial_log"; then
   echo "FAIL: the #UD exception was not reported" >&2
   failures=$((failures + 1))

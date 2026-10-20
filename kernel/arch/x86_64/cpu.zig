@@ -38,6 +38,37 @@ pub fn loadIdt(descriptor: *const Descriptor) void {
         : .{ .memory = true, .rax = true });
 }
 
+/// Read the Interrupt Descriptor Table register back.
+///
+/// The values are extracted inside the assembly block and returned through
+/// output operands. Writing them into a memory operand and reading that
+/// memory from Zig is not reliable: the compiler may keep a separate copy
+/// of the buffer and hand the caller the copy instead of what the CPU wrote.
+pub fn readIdt() Descriptor {
+    var buffer: [16]u8 align(16) = undefined;
+    var limit: u32 = undefined;
+    var base: u32 = undefined;
+
+    asm volatile (
+        \\ movq %[ptr], %%rcx
+        \\ sidtq (%%rcx)
+        \\ movzwl (%%rcx), %%eax
+        \\ movl 2(%%rcx), %%edx
+        : [limit] "={eax}" (limit),
+          [base] "={edx}" (base),
+        : [ptr] "{rcx}" (&buffer),
+        : .{ .memory = true });
+
+    return .{
+        .limit = @truncate(limit),
+        .base = base,
+        .reserved = 0,
+        ._pad0 = 0,
+        ._pad1 = 0,
+        ._pad2 = 0,
+    };
+}
+
 /// Read the current code segment selector.
 ///
 /// Using the live selector instead of a hardcoded 0x08 keeps the kernel

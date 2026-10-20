@@ -171,11 +171,26 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
+
+    // The GDT encoder is architecture specific but pure logic, so it is
+    // verified on the host as well.
+    const gdt_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("kernel/arch/x86_64/gdt.zig"),
+            .target = host_target,
+            .optimize = .Debug,
+            .imports = &.{
+                .{ .name = "com1", .module = com1_module },
+            },
+        }),
+    });
     const unit_test_run = b.addRunArtifact(unit_tests);
     const shared_test_run = b.addRunArtifact(shared_tests);
+    const gdt_test_run = b.addRunArtifact(gdt_tests);
     const unit_test_step = b.step("unit-test", "Run the host unit tests");
     unit_test_step.dependOn(&unit_test_run.step);
     unit_test_step.dependOn(&shared_test_run.step);
+    unit_test_step.dependOn(&gdt_test_run.step);
 
     const boot_test = b.addSystemCommand(&.{ "bash", "tests/boot/test-m1-boot.sh" });
     boot_test.addArg(esp_image);

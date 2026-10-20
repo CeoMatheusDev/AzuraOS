@@ -20,6 +20,7 @@ const shared_framebuffer = @import("framebuffer");
 const build_options = @import("build_options");
 
 const cpu = @import("arch/x86_64/cpu.zig");
+const gdt = @import("arch/x86_64/gdt.zig");
 const idt = @import("arch/x86_64/idt.zig");
 
 /// Number of memory map entries printed in the boot log.
@@ -65,9 +66,28 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     printMemoryMap(boot_info);
     printFramebuffer(boot_info);
 
-    // From this point on a CPU fault is reported instead of rebooting the
-    // machine.
-    idt.install();
+    // The IDT is installed first, with the selector that is active at this
+    // moment. That way a fault during the GDT switch is reported by the
+    // handler instead of escalating to a triple fault, which would reboot
+    // the machine with no diagnostic at all.
+    const initial_selector = cpu.codeSelector();
+    idt.install(initial_selector);
+    com1.print("[azura] IDT installed, provisional selector 0x{x}\n", .{initial_selector});
+
+    // Install the GDT the kernel owns. Until now the kernel was running on
+    // the GDT the firmware built, which only worked by accident.
+    gdt.init();
+    printGdt();
+
+    // The handlers now run in the kernel's own code segment, so the IDT has
+    // to name that selector.
+    idt.install(gdt.kernel_code_selector);
+
+    // Check that every entry really points at the beginning of its stub.
+    if (idt.verifyEntries()) |vector| {
+        com1.print("[azura] FATAL: IDT entry for vector {d} does not point at its stub\n", .{vector});
+        cpu.haltForever();
+    }
     com1.write("[azura] IDT installed, exception handling active\n");
 
     if (build_options.fault_inject) {
@@ -79,6 +99,41 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
 
     com1.write("[azura] boot complete, halting\n");
     cpu.haltForever();
+}
+
+/// Print the GDT the kernel just installed, and prove that it is the one
+/// the processor is actually using.
+///
+/// The check reads the GDTR back and compares it with the table this module
+/// built, and reads the live CS register. Both must match, otherwise the
+/// kernel would still be running on the firmware's descriptors.
+fn printGdt() void {
+    const descriptor = gdt.readPseudoDescriptor();
+    const selector = cpu.codeSelector();
+
+    com1.print("[azura] GDT: base=0x{x} limit={d} (expected 0x{x} / {d})\n", .{
+        descriptor.base,
+        descriptor.limit,
+        gdt.baseAddress(),
+        gdt.limit(),
+    });
+    com1.print("[azura] GDT: code selector=0x{x} data selector=0x{x}\n", .{
+        selector,
+        gdt.kernel_data_selector,
+    });
+
+    if (descriptor.base != gdt.baseAddress() or descriptor.limit != gdt.limit()) {
+        com1.write("[azura] FATAL: the processor is not using the kernel GDT\n");
+        cpu.haltForever();
+    }
+    if (selector != gdt.kernel_code_selector) {
+        com1.print("[azura] FATAL: CS is 0x{x}, expected 0x{x}\n", .{
+            selector,
+            gdt.kernel_code_selector,
+        });
+        cpu.haltForever();
+    }
+    com1.write("[azura] GDT active, the segments are the kernel's own\n");
 }
 
 /// Print a preview of the physical memory map handed over by the bootloader.
