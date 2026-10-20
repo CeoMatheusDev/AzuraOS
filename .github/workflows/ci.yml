@@ -55,7 +55,8 @@ jobs:
           # same verification.
           bash "$GITHUB_WORKSPACE/tools/verify-zig-release.sh" "$PWD/$ZIG_ARCHIVE"
           tar -xf "$ZIG_ARCHIVE"
-          echo "$RUNNER_TEMP/zig-$ZIG_VERSION" >> "$GITHUB_PATH"
+          # The archive extracts to a directory named after the archive.
+          echo "$RUNNER_TEMP/${ZIG_ARCHIVE%.tar.xz}" >> "$GITHUB_PATH"
           echo "ZIG_VERSION=$ZIG_VERSION" >> "$GITHUB_ENV"
 
       - name: Check the toolchain
@@ -118,7 +119,7 @@ jobs:
           curl -fsSL -o "$ZIG_ARCHIVE" "$ZIG_URL"
           bash "$GITHUB_WORKSPACE/tools/verify-zig-release.sh" "$PWD/$ZIG_ARCHIVE"
           tar -xf "$ZIG_ARCHIVE"
-          echo "$RUNNER_TEMP/zig-$ZIG_VERSION" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/${ZIG_ARCHIVE%.tar.xz}" >> "$GITHUB_PATH"
       - name: Check the formatting
         run: |
           set -euo pipefail
