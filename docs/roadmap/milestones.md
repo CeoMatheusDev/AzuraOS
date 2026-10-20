@@ -42,7 +42,7 @@ In progress, on the branch `feat/m2-kernel-ownership`.
 | Step | Content | State |
 | ---- | ------- | ----- |
 | M2.1 | Own GDT, own segments | done, `docs/adr/ADR-0004-kernel-gdt.md` |
-| M2.2 | `ExitBootServices` with the memory map key | not started |
+| M2.2 | `ExitBootServices` with the memory map key | not started, criteria in `docs/specs/m2.2-exitbootservices.md` |
 | M2.3 | Physical memory manager, frame allocation and release | not started |
 | M2.4 | Own paging, W^X, NX, controlled page faults | not started |
 | M2.5 | Kernel heap, allocation and fragmentation tests | not started |
@@ -54,6 +54,17 @@ The order matters. Before `ExitBootServices` the kernel has to guarantee that
 the code, the stack, the page tables, the GDT, the IDT and the framebuffer
 stay accessible, and it has to handle the memory map key change the
 specification requires.
+
+`ExitBootServices` and the installation of the kernel's own page tables are
+distinct operations and may be split into steps, as long as the sequence
+guarantees that no address the kernel still needs becomes unmapped. The
+acceptance criteria for M2.2 are written down in
+`docs/specs/m2.2-exitbootservices.md`.
+
+A TSS with an alternate stack for critical faults, in particular `#DF`, is
+needed before interrupts become complex or processes are isolated. It is
+scheduled right after M2.2, because without it a fault on the kernel stack
+cannot be reported.
 
 ## M3 — Execution
 
