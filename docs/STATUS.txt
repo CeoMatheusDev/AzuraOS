@@ -341,15 +341,23 @@ um defeito real do próprio CI, não do kernel. O workflow instalava o pacote
 exatamente (docs/TOOLCHAIN.md). Com 0.16.0 o build parava em
 "invalid builtin function: '@backingInt'".
 
-DUAS CORRECOES:
+CORRECOES:
   1. O CI agora baixa o Zig 0.17.0 oficial, confere o SHA-256 com
      tools/verify-zig-release.sh, o mesmo script que o desenvolvedor usa, e
      falha se "zig version" não for 0.17.0. O pacote da distribuição deixou
-     de ser usado.
-  2. O código deixou de usar @backingInt, que foi removido no Zig 0.16, e
-     passou a usar @intFromEnum. Não há nenhum ganho em depender de um
-     builtin obsoleto, e assim o código não fica preso a uma versão sem
-     necessidade.
+     de ser usado. A primeira tentativa apontava o GITHUB_PATH para um
+     diretório inexistente: o tarball extrai para um diretório com o nome do
+     arquivo, não "zig-<versao>".
+  2. A segunda "correção" foi na verdade um erro de análise e foi revertida
+     no commit seguinte: @backingInt NÃO é um builtin obsoleto. No Zig
+     0.17.0 ele é a grafia canônica, e o próprio "zig fmt" normaliza
+     @intFromEnum para @backingInt. A falha do CI vinha do Zig 0.16.0 do
+     Fedora, onde o builtin não existe com nenhum dos dois nomes. A
+     correção é o pin da toolchain; o código deve continuar na grafia do
+     0.17.0, que é o que o formatador exige e o que o CI confere.
+
+CONSEQUENCIA: "zig fmt --check" passa a ser uma guarda real: foi ele que
+detectou a divergência de grafia na primeira execução do CI.
 
 LIMITAÇÕES CONHECIDAS:
   - O kernel ainda usa as tabelas de página do firmware e não chamou
