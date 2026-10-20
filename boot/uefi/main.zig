@@ -237,7 +237,7 @@ fn isUsableRange(memory_map: MemoryMap, base: u64, length: u64) bool {
         var index: usize = 0;
         while (index < memory_map.count) : (index += 1) {
             const descriptor = descriptorAt(memory_map, index);
-            if (descriptor.type != @intFromEnum(shared.memory_type.conventional)) continue;
+            if (descriptor.type != @backingInt(shared.memory_type.conventional)) continue;
             const region_start = descriptor.physical_start;
             const region_end = region_start + descriptor.number_of_pages * 4096;
             if (region_start <= covered and region_end > covered) {

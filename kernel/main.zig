@@ -156,7 +156,7 @@ fn printMemoryMap(boot_info: *shared.boot_info) void {
         const descriptor: *const shared.memory_descriptor = @ptrCast(@alignCast(
             @as([*]const u8, @ptrFromInt(boot_info.memory_map)) + offset,
         ));
-        if (descriptor.type == @intFromEnum(shared.memory_type.conventional)) conventional_pages += descriptor.number_of_pages;
+        if (descriptor.type == @backingInt(shared.memory_type.conventional)) conventional_pages += descriptor.number_of_pages;
     }
     com1.print("[azura] conventional memory: {d} MiB\n", .{conventional_pages * 4096 / (1024 * 1024)});
 
