@@ -18,3 +18,22 @@
 !.env.example
 .idea/
 .vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Zig
+.zig-cache/
+zig-out/
+
+# Build artifacts
+*.o
+*.obj
+*.elf
+*.efi
+*.iso
+
+# Temporary files
+*.log
+*.tmp
