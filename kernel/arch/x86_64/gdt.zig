@@ -20,6 +20,7 @@
 const std = @import("std");
 const com1 = @import("com1");
 const cpu = @import("cpu.zig");
+const tss = @import("tss.zig");
 
 /// Selector of the kernel code segment.
 pub const kernel_code_selector: u16 = 0x08;
@@ -113,6 +114,10 @@ const entry_count = 16;
 ///         during the transition
 var table: [entry_count]Entry align(8) = undefined;
 
+// Static lifetime is required: the CPU may access IST1 on any #DF.
+var df_stack: [16384]u8 align(16) = @splat(0);
+var task_state: tss.Tss = .{};
+
 var pseudo_descriptor: PseudoDescriptor = .{ .limit = 0, .base = 0 };
 
 /// Install the GDT and switch the processor to it.
@@ -135,6 +140,22 @@ pub fn init() void {
     table[1] = Entry.longCode();
     table[2] = Entry.data();
 
+    const stack_base = @intFromPtr(&df_stack);
+    const stack_top = stack_base + df_stack.len;
+    if (!tss.validIstStack(stack_base, stack_top)) {
+        com1.write("[azura] FATAL: invalid IST stack\n");
+        cpu.haltForever();
+    }
+    task_state.ist1 = stack_top;
+    // TSS must remain in mapped, writable memory for the CPU lifetime.
+    const system_descriptor: [2]Entry = @bitCast(tss.descriptor(@intFromPtr(&task_state)));
+    table[3] = system_descriptor[0];
+    table[4] = system_descriptor[1];
+
+    if (!tss.firmwareSelectorCompatible(previous_selector)) {
+        com1.write("[azura] FATAL: firmware CS conflicts with TSS\n");
+        cpu.haltForever();
+    }
     if (previous_index != 1 and previous_index != 2) {
         if (previous_index >= entry_count) {
             // The firmware uses a selector the table cannot hold. The
@@ -171,6 +192,29 @@ pub fn init() void {
           [data] "i" (kernel_data_selector),
           [code] "i" (kernel_code_selector),
         : .{ .rax = true, .memory = true });
+}
+
+/// Load the Task Register after the kernel GDT has become active.
+/// The caller must verify GDTR/CS before invoking this privileged operation.
+pub fn loadTaskRegister() void {
+    asm volatile ("ltrw %[selector]"
+        :
+        : [selector] "r" (tss.selector),
+        : .{ .memory = true });
+}
+
+/// Read the current Task Register selector for boot diagnostics.
+pub fn readTaskRegister() u16 {
+    return asm volatile ("strw %[selector]"
+        : [selector] "=r" (-> u16),
+    );
+}
+
+/// Return the exclusive bounds of the dedicated double-fault IST1 stack.
+/// Used by the fault handler to confirm that its frame is on IST1.
+pub fn doubleFaultStackBounds() struct { base: u64, top: u64 } {
+    const base = @intFromPtr(&df_stack);
+    return .{ .base = base, .top = base + df_stack.len };
 }
 
 /// Read the GDTR back, to prove which GDT the processor is using.

@@ -23,6 +23,7 @@ const build_options = @import("build_options");
 const cpu = @import("arch/x86_64/cpu.zig");
 const gdt = @import("arch/x86_64/gdt.zig");
 const idt = @import("arch/x86_64/idt.zig");
+const tss = @import("arch/x86_64/tss.zig");
 
 /// Number of memory map entries printed in the boot log.
 const memory_map_preview = 8;
@@ -98,7 +99,7 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     // handler instead of escalating to a triple fault, which would reboot
     // the machine with no diagnostic at all.
     const initial_selector = cpu.codeSelector();
-    idt.install(initial_selector);
+    idt.install(initial_selector, false);
     com1.print("[azura] IDT installed, provisional selector 0x{x}\n", .{initial_selector});
 
     // Install the GDT the kernel owns. Until now the kernel was running on
@@ -106,9 +107,25 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     gdt.init();
     printGdt();
 
+    // Only load TR after confirming the kernel GDT and CS are active.
+    // A failed LTR can raise #GP; keep the provisional IDT installed here.
+    gdt.loadTaskRegister();
+    const active_tr = gdt.readTaskRegister();
+    if (active_tr != tss.selector) {
+        com1.print("[azura] FATAL: TR is 0x{x}, expected 0x{x}\n", .{ active_tr, tss.selector });
+        cpu.haltForever();
+    }
+    com1.print("[azura] TSS task register loaded (TR=0x{x})\n", .{active_tr});
+
     // The handlers now run in the kernel's own code segment, so the IDT has
     // to name that selector.
-    idt.install(gdt.kernel_code_selector);
+    idt.install(gdt.kernel_code_selector, true);
+
+    if (!idt.verifyIstConfiguration(true, gdt.kernel_code_selector)) {
+        com1.write("[azura] FATAL: IDT selector or IST routing mismatch\n");
+        cpu.haltForever();
+    }
+    com1.write("[azura] double-fault gate: IST1 configured\n");
 
     // Check that every entry really points at the beginning of its stub.
     if (idt.verifyEntries()) |vector| {

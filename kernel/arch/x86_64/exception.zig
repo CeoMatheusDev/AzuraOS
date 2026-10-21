@@ -228,3 +228,40 @@ test "the same raw words decode differently depending on the vector" {
     try testing.expectEqual(frame.word3, with.rflags);
     try testing.expectEqual(@as(?u64, frame.word0), with.error_code);
 }
+
+/// True when an entire CPU-pushed exception frame lies within a stack.
+/// Uses subtraction after ordering checks to avoid integer overflow.
+pub fn frameFitsStack(frame_address: u64, stack_base: u64, stack_top: u64, frame_bytes: u64) bool {
+    return stack_base < stack_top and frame_bytes != 0 and
+        frame_address >= stack_base and frame_address < stack_top and
+        stack_top - frame_address >= frame_bytes;
+}
+
+test "exception frame must fit completely within IST stack" {
+    const testing = std.testing;
+    const base: u64 = 0x1000;
+    const top: u64 = 0x5000;
+    try testing.expect(frameFitsStack(top - 48, base, top, 48));
+    try testing.expect(frameFitsStack(base, base, top, 48));
+    try testing.expect(!frameFitsStack(top - 47, base, top, 48));
+    try testing.expect(!frameFitsStack(base - 1, base, top, 48));
+    try testing.expect(!frameFitsStack(top, base, top, 48));
+    try testing.expect(!frameFitsStack(base, top, base, 48));
+    try testing.expect(!frameFitsStack(base, base, top, 0));
+    try testing.expect(!frameFitsStack(0xffff_ffff_ffff_fff0, base, top, 48));
+
+    // A frame exactly filling the stack is valid; one byte larger is not.
+    try testing.expect(frameFitsStack(base, base, top, top - base));
+    try testing.expect(!frameFitsStack(base, base, top, top - base + 1));
+
+    // Degenerate and reversed ranges must be rejected, even for a small frame.
+    try testing.expect(!frameFitsStack(base, base, base, 1));
+    try testing.expect(!frameFitsStack(base, top, base, 1));
+
+    // High-half canonical kernel addresses must not overflow the bounds check.
+    const high_base: u64 = 0xffff_ffff_ffff_c000;
+    const high_top: u64 = 0xffff_ffff_ffff_f000;
+    try testing.expect(frameFitsStack(high_top - 48, high_base, high_top, 48));
+    try testing.expect(!frameFitsStack(high_top - 47, high_base, high_top, 48));
+    try testing.expect(!frameFitsStack(0xffff_ffff_ffff_fff0, high_base, high_top, 48));
+}

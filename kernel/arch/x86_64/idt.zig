@@ -23,6 +23,8 @@
 const com1 = @import("com1");
 const cpu = @import("cpu.zig");
 const exception = @import("exception.zig");
+const tss = @import("tss.zig");
+const gdt = @import("gdt.zig");
 
 /// One IDT entry. 16 bytes, as required by the 64-bit IDT format.
 pub const Entry = extern struct {
@@ -90,7 +92,7 @@ var handler_address: usize = 0;
 /// Must be called with interrupts disabled. After this call every CPU
 /// exception lands in `commonHandler` instead of escalating to a triple
 /// fault.
-pub fn install(code_selector: u16) void {
+pub fn install(code_selector: u16, task_register_ready: bool) void {
     handler_address = @intFromPtr(&azuraCommonHandler);
 
     inline for (0..exception_vector_count) |vector| {
@@ -98,7 +100,7 @@ pub fn install(code_selector: u16) void {
         table[vector] = .{
             .offset_low = @truncate(stub),
             .selector = code_selector,
-            .ist = 0,
+            .ist = if (vector == 8 and task_register_ready) tss.double_fault_ist else 0,
             .type_attr = gate_type,
             .offset_middle = @truncate(stub >> 16),
             .offset_high = @truncate(stub >> 32),
@@ -116,6 +118,28 @@ pub fn install(code_selector: u16) void {
     };
 
     cpu.loadIdt(&descriptor);
+}
+
+/// Verify the double-fault gate uses the intended IST only after LTR.
+/// The remaining exception vectors must continue using the current stack.
+pub fn verifyIstConfiguration(task_register_ready: bool, code_selector: u16) bool {
+    for (table[0..exception_vector_count], 0..) |entry, vector| {
+        const expected_ist: u8 = if (vector == 8 and task_register_ready)
+            tss.double_fault_ist
+        else
+            0;
+        if (entry.ist != expected_ist or entry.selector != code_selector or
+            entry.type_attr != gate_type or entry.reserved != 0)
+            return false;
+    }
+    return true;
+}
+
+/// Return the saved stack pointer from the CPU's #DF exception frame.
+/// This is read-only diagnostics; it does not intentionally provoke a #DF.
+pub fn doubleFaultStackPointer(frame: *const Frame) u64 {
+    // #DF pushes an error code, followed by RIP, CS, RFLAGS, old RSP, SS.
+    return frame.word4;
 }
 
 /// Build the per-vector trampoline.
@@ -219,7 +243,7 @@ const stub_vector_opcode = [_]u8{ 0x48, 0xc7, 0xc7 };
 ///   `fc`            `cld`
 const stub_fixup = [_]u8{ 0x48, 0x89, 0xe6, 0x48, 0x83, 0xe4, 0xf0, 0xfc };
 
-/// Verify that every entry points at the beginning in its stub.
+/// Verify that every installed IDT entry points at the beginning of its stub.
 ///
 /// Reading the bytes the stub must start with, at the address the IDT
 /// names, proves that the entry points at the start of the stub and not
@@ -238,6 +262,13 @@ const stub_fixup = [_]u8{ 0x48, 0x89, 0xe6, 0x48, 0x83, 0xe4, 0xf0, 0xfc };
 pub fn verifyEntries() ?u8 {
     inline for (0..exception_vector_count) |vector| {
         const address = makeStub(vector);
+        const entry = table[vector];
+        // Verify the address actually installed in the IDT, not just the
+        // contents at the expected stub address.
+        const installed_address: u64 = @as(u64, entry.offset_low) |
+            (@as(u64, entry.offset_middle) << 16) |
+            (@as(u64, entry.offset_high) << 32);
+        if (installed_address != @as(u64, @intCast(address))) return @intCast(vector);
         const bytes: [*]const u8 = @ptrFromInt(address);
 
         for (stub_vector_opcode, 0..) |expected, index| {
@@ -264,6 +295,28 @@ pub fn verifyEntries() ?u8 {
 /// Called with the System V C ABI, so the stub must have left the stack
 /// pointer 16 byte aligned and the direction flag clear. See `makeStub`.
 export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void {
+    // Validate the #DF frame on IST1 before dereferencing it.
+    if (vector == 8) {
+        const bounds = gdt.doubleFaultStackBounds();
+        const frame_address = @intFromPtr(frame);
+        // #DF pushes six 8-byte words; validate the entire CPU frame, not
+        // merely its first byte, without risking an overflowing addition.
+        const frame_size: u64 = 6 * @sizeOf(u64);
+        const on_ist1 = exception.frameFitsStack(
+            frame_address,
+            bounds.base,
+            bounds.top,
+            frame_size,
+        );
+        com1.print("[azura] DOUBLE FAULT: frame=0x{x} IST1=[0x{x},0x{x}) active={s}\n", .{
+            frame_address, bounds.base, bounds.top, if (on_ist1) "yes" else "no",
+        });
+        if (!on_ist1) {
+            com1.write("[azura] KERNEL FAULT: invalid double-fault frame; machine halted\n");
+            cpu.haltForever();
+        }
+    }
+
     const context = exception.decodeFrame(vector, frame);
     com1.print("[azura] KERNEL FAULT: vector {d} ({s})\n", .{
         vector,

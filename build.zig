@@ -219,6 +219,15 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
+    // Pure TSS descriptor encoding: test on the host before wiring LTR/IST.
+    const tss_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("kernel/arch/x86_64/tss.zig"),
+            .target = host_target,
+            .optimize = .Debug,
+        }),
+    });
+    const tss_test_run = b.addRunArtifact(tss_tests);
     const unit_test_run = b.addRunArtifact(unit_tests);
     const shared_test_run = b.addRunArtifact(shared_tests);
     const gdt_test_run = b.addRunArtifact(gdt_tests);
@@ -227,6 +236,7 @@ pub fn build(b: *std.Build) void {
     unit_test_step.dependOn(&unit_test_run.step);
     unit_test_step.dependOn(&shared_test_run.step);
     unit_test_step.dependOn(&gdt_test_run.step);
+    unit_test_step.dependOn(&tss_test_run.step);
     unit_test_step.dependOn(&exception_test_run.step);
 
     const boot_test = b.addSystemCommand(&.{ "bash", "tests/boot/test-m1-boot.sh" });
