@@ -71,3 +71,56 @@ test "TSS descriptor encodes 64-bit base" {
         (@as(u64, entry.base_high) << 24) |
         (@as(u64, entry.base_upper) << 32));
 }
+
+ 
+/// Selector 0x18 occupies GDT slots 3 and 4. The firmware CS alias
+/// must not overlap either slot while the GDT is being installed.
+pub const selector: u16 = 0x18;
+pub const descriptor_slot: usize = selector >> 3;
+pub const descriptor_slots: usize = 2;
+
+/// An IDT IST field is three bits wide. Zero selects the current stack.
+pub const double_fault_ist: u8 = 1;
+
+/// Returns whether a firmware CS selector can coexist with the reserved
+/// TSS slots during the firmware-to-kernel GDT transition.
+pub fn firmwareSelectorCompatible(firmware_cs: u16) bool {
+    if ((firmware_cs & 0x7) != 0) return false;
+    const slot: usize = firmware_cs >> 3;
+    return slot != descriptor_slot and slot != descriptor_slot + 1;
+}
+
+/// Verify a downward-growing stack is usable as an IST stack.
+/// The top must be 16-byte aligned and canonical in 48-bit VA mode.
+/// Mapping, reservation, and guard pages are checked separately at boot.
+pub fn validIstStack(base: u64, top: u64) bool {
+    if (base == 0 or top <= base or top - base < 4096) return false;
+    if ((top & 15) != 0) return false;
+    const sign = top >> 47;
+    return sign == 0 or sign == 0x1ffff;
+}
+
+comptime {
+    if (descriptor_slot != 3) @compileError("TSS selector must start at GDT slot 3");
+    if (double_fault_ist < 1 or double_fault_ist > 7)
+        @compileError("invalid double-fault IST index");
+}
+
+test "TSS descriptor occupies reserved GDT slots" {
+    try std.testing.expectEqual(@as(usize, 3), descriptor_slot);
+    try std.testing.expectEqual(@as(usize, 2), descriptor_slots);
+    try std.testing.expect(firmwareSelectorCompatible(0x08));
+    try std.testing.expect(firmwareSelectorCompatible(0x38));
+    try std.testing.expect(!firmwareSelectorCompatible(0x18));
+    try std.testing.expect(!firmwareSelectorCompatible(0x20));
+    try std.testing.expect(!firmwareSelectorCompatible(0x1b));
+}
+
+test "IST stack boundaries reject invalid ranges" {
+    try std.testing.expect(validIstStack(0x100000, 0x104000));
+    try std.testing.expect(!validIstStack(0, 0x104000));
+    try std.testing.expect(!validIstStack(0x100000, 0x100000));
+    try std.testing.expect(!validIstStack(0x100000, 0x100100));
+    try std.testing.expect(!validIstStack(0x100000, 0x104008));
+    try std.testing.expect(!validIstStack(0x100000, 0x0001_0000_0000_0000));
+}
