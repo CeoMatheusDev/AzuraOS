@@ -10,8 +10,8 @@ compatibility is claimed unless it has been demonstrated.
 > **Status: M2.2 (`ExitBootServices`) implemented on its branch.** The
 > bootloader now hands the machine over with the boot services gone, and the
 > kernel proves that the stack, the GDT, the IDT, the framebuffer and the
-> memory map survived. The merge into `main` is pending; M1 is the latest
-> state on `main`.
+> memory map survived. PR #2 is open with a green CI; the merge into `main`
+> is pending.
 
 ## Current state
 
@@ -21,7 +21,7 @@ compatibility is claimed unless it has been demonstrated.
 | M1 Boot | done | `docs/testing/m1-boot-evidence.md` |
 | M2.1 Kernel GDT | done, merged in `1e87504` (PR #1) | `docs/adr/ADR-0004-kernel-gdt.md` |
 | CI (GitHub Actions) | **passing** | run 39537277273 (main, `1e87504`) |
-| M2.2 `ExitBootServices` | done on `feat/m2-exit-boot-services`, merge pending | `docs/testing/m2.2-exitbootservices-evidence.md` |
+| M2.2 `ExitBootServices` | done, PR #2 open with green CI; merge pending | `docs/testing/m2.2-exitbootservices-evidence.md` |
 | M3 Execution | not started | — |
 
 The boot chain implemented today:
