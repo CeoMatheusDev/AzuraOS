@@ -87,7 +87,7 @@ pub const double_fault_ist: u8 = 1;
 /// Returns whether a firmware CS selector can coexist with the reserved
 /// TSS slots during the firmware-to-kernel GDT transition.
 pub fn firmwareSelectorCompatible(firmware_cs: u16) bool {
-    if ((firmware_cs & 0x7) != 0) return false;
+    if ((firmware_cs & 0x7) != 0 or firmware_cs == 0) return false;
     const slot: usize = firmware_cs >> 3;
     return slot != descriptor_slot and slot != descriptor_slot + 1;
 }
@@ -124,6 +124,12 @@ test "TSS descriptor occupies reserved GDT slots" {
     try std.testing.expect(!firmwareSelectorCompatible(0x18));
     try std.testing.expect(!firmwareSelectorCompatible(0x20));
     try std.testing.expect(!firmwareSelectorCompatible(0x1b));
+    // Reject selectors from the LDT (TI=1) and nonzero privilege levels.
+    try std.testing.expect(!firmwareSelectorCompatible(0x0c));
+    try std.testing.expect(!firmwareSelectorCompatible(0x0b));
+    try std.testing.expect(!firmwareSelectorCompatible(0x3b));
+    // A null selector is not a usable code segment.
+    try std.testing.expect(!firmwareSelectorCompatible(0x00));
 }
 
 test "IST stack boundaries reject invalid ranges" {
