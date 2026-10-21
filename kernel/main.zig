@@ -1,17 +1,18 @@
-//! AzuraOS kernel entry point (M1).
+//! AzuraOS kernel entry point.
 //!
 //! The kernel is a freestanding ELF64 image loaded by the UEFI bootloader.
 //! The bootloader jumps here with RDI pointing at the `boot_info` structure
-//! described in shared/boot_info.zig.
+//! described in shared/boot_info.zig, after it has called ExitBootServices.
 //!
-//! Scope of this milestone:
+//! Scope of this milestone (M2.2):
 //!   * validate the boot protocol contract,
+//!   * prove that the boot services are gone and that the environment they
+//!     left behind (stack, GDT, IDT, framebuffer, memory map) is still valid,
 //!   * install the IDT so CPU faults are reported instead of rebooting,
-//!   * print the handover information to the serial port,
 //!   * stop the machine in a controlled way.
 //!
-//! NOT in this milestone: own GDT, own page tables, ExitBootServices,
-//! heap, scheduler, drivers. Those are M2 and later.
+//! NOT in this milestone: the kernel's own page tables (M2.4), the physical
+//! memory manager (M2.3), heap, scheduler and drivers.
 
 const std = @import("std");
 const shared = @import("shared");
@@ -26,6 +27,13 @@ const idt = @import("arch/x86_64/idt.zig");
 /// Number of memory map entries printed in the boot log.
 const memory_map_preview = 8;
 
+/// Bytes per page in the UEFI memory map.
+const page_size: u64 = 4096;
+
+/// Pattern written to the kernel stack after the handover. The value is
+/// arbitrary but distinctive, so a mismatch is unambiguous in the log.
+const stack_probe_pattern: u64 = 0x5a17_c0de_1234_5678;
+
 /// Kernel entry point. The build system points the ELF entry symbol here.
 ///
 /// Invariants:
@@ -34,7 +42,7 @@ const memory_map_preview = 8;
 ///   * the CPU is in 64-bit long mode with interrupts disabled.
 pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     com1.init();
-    com1.write("[azura] === AzuraOS kernel v0.1.0 (M1) ===\n");
+    com1.write("[azura] === AzuraOS kernel v0.1.0 (M2.2) ===\n");
 
     if (boot_info.magic != shared.magic) {
         com1.print("[azura] FATAL: bad boot magic 0x{x}\n", .{boot_info.magic});
@@ -52,15 +60,34 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
         cpu.haltForever();
     }
 
+    // The whole milestone rests on this field: the kernel is not allowed to
+    // assume that the firmware is gone when the bootloader did not say so.
+    if (boot_info.boot_services_exited != 1) {
+        com1.write("[azura] FATAL: the bootloader did not exit the boot services\n");
+        cpu.haltForever();
+    }
+
     com1.print("[azura] boot protocol: version {d}, {d} bytes\n", .{
         boot_info.version,
         boot_info.size,
     });
+    com1.print("[azura] boot services: exited, memory map key=0x{x}\n", .{boot_info.memory_map_key});
+
+    // The mapping is still the firmware's. This is deliberate for M2.2: the
+    // kernel does not own the page tables yet, and the log has to say so
+    // instead of implying that it does.
+    com1.print("[azura] page tables: the firmware's (CR3=0x{x}), the kernel's own are M2.4\n", .{
+        cpu.readCr3(),
+    });
+
     com1.print("[azura] kernel image: 0x{x}..0x{x}\n", .{
         boot_info.kernel_start,
         boot_info.kernel_end,
     });
-    com1.print("[azura] stack top: 0x{x}\n", .{boot_info.stack_top});
+    com1.print("[azura] stack: base=0x{x} top=0x{x}\n", .{
+        boot_info.stack_base,
+        boot_info.stack_top,
+    });
     com1.print("[azura] memory map: {d} entries\n", .{boot_info.memory_map_count});
 
     printMemoryMap(boot_info);
@@ -89,6 +116,15 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
         cpu.haltForever();
     }
     com1.write("[azura] IDT installed, exception handling active\n");
+
+    // Prove that the environment the firmware left behind is still usable
+    // after the transition. The GDT was checked by printGdt and the IDT
+    // entries by verifyEntries; the stack and the IDT register are checked
+    // here, and printMemoryMap/printFramebuffer above proved that the map
+    // and the framebuffer are readable.
+    verifyStack(boot_info);
+    verifyIdt();
+    com1.write("[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok framebuffer=ok memory_map=ok\n");
 
     if (build_options.fault_mode.len != 0 and !std.mem.eql(u8, build_options.fault_mode, "none")) {
         injectFault(build_options.fault_mode);
@@ -176,37 +212,108 @@ fn printGdt() void {
     com1.write("[azura] GDT active, the segments are the kernel's own\n");
 }
 
-/// Print a preview of the physical memory map handed over by the bootloader.
+/// Read the n-th descriptor of the map handed over by the bootloader.
+fn descriptorAt(boot_info: *shared.boot_info, index: u32) *const shared.memory_descriptor {
+    const offset = @as(usize, index) * boot_info.memory_map_descriptor_size;
+    return @ptrCast(@alignCast(
+        @as([*]const u8, @ptrFromInt(boot_info.memory_map)) + offset,
+    ));
+}
+
+/// Validate, classify and print the physical memory map.
+///
+/// The map was taken by the bootloader BEFORE ExitBootServices, so the boot
+/// services regions in it are still described as owned by the firmware. They
+/// are free after the transition, but the kernel does not allocate them
+/// until M2.3 has built the physical allocator; see ADR-0007.
+///
+/// Every descriptor is checked before its address range is used: a firmware
+/// can describe a range that wraps around the 64-bit address space, and an
+/// allocator built on that would hand out memory that does not exist.
 fn printMemoryMap(boot_info: *shared.boot_info) void {
     if (boot_info.memory_map == 0 or boot_info.memory_map_count == 0) {
-        com1.write("[azura] memory map: EMPTY\n");
-        return;
+        com1.write("[azura] FATAL: the memory map is empty\n");
+        cpu.haltForever();
     }
     if (boot_info.memory_map_descriptor_size < @sizeOf(shared.memory_descriptor)) {
-        com1.print("[azura] memory map: unexpected descriptor size {d}\n", .{
+        com1.print("[azura] FATAL: memory map descriptor size {d} is too small\n", .{
             boot_info.memory_map_descriptor_size,
         });
-        return;
+        cpu.haltForever();
+    }
+
+    // Bound the walk before multiplying: the count and the stride come from
+    // the bootloader, but a corrupted structure must fail a check instead of
+    // reading past the map buffer.
+    const map_bytes = @as(u64, boot_info.memory_map_count) * @as(u64, boot_info.memory_map_descriptor_size);
+    if (map_bytes == 0 or map_bytes > 16 * 1024 * 1024) {
+        com1.print("[azura] FATAL: memory map size {d} bytes is out of range\n", .{map_bytes});
+        cpu.haltForever();
     }
 
     var index: u32 = 0;
     var conventional_pages: u64 = 0;
+    var boot_services_pages: u64 = 0;
+    var loader_pages: u64 = 0;
+    var map_buffer_type: ?u32 = null;
+    const map_address = boot_info.memory_map;
+
     while (index < boot_info.memory_map_count) : (index += 1) {
-        const offset = @as(usize, index) * boot_info.memory_map_descriptor_size;
-        const descriptor: *const shared.memory_descriptor = @ptrCast(@alignCast(
-            @as([*]const u8, @ptrFromInt(boot_info.memory_map)) + offset,
-        ));
-        if (descriptor.type == @backingInt(shared.memory_type.conventional)) conventional_pages += descriptor.number_of_pages;
+        const descriptor = descriptorAt(boot_info, index);
+
+        // A range that wraps around the address space is not memory. Refuse
+        // the whole map instead of carrying a poisoned entry forward.
+        const max_pages = (std.math.maxInt(u64) - descriptor.physical_start) / page_size;
+        if (descriptor.number_of_pages > max_pages) {
+            com1.print("[azura] FATAL: memory map entry {d} wraps around the address space\n", .{index});
+            cpu.haltForever();
+        }
+
+        const end = descriptor.physical_start + descriptor.number_of_pages * page_size;
+        if (descriptor.physical_start <= map_address and map_address < end) {
+            map_buffer_type = descriptor.type;
+        }
+
+        switch (descriptor.type) {
+            @backingInt(shared.memory_type.conventional) => conventional_pages += descriptor.number_of_pages,
+            @backingInt(shared.memory_type.boot_services_code),
+            @backingInt(shared.memory_type.boot_services_data),
+            => boot_services_pages += descriptor.number_of_pages,
+            @backingInt(shared.memory_type.loader_code),
+            @backingInt(shared.memory_type.loader_data),
+            => loader_pages += descriptor.number_of_pages,
+            else => {},
+        }
     }
-    com1.print("[azura] conventional memory: {d} MiB\n", .{conventional_pages * 4096 / (1024 * 1024)});
+
+    // The map must describe the memory it lives in. If it does not, either
+    // the pointer is wrong or the map is not self consistent, and neither is
+    // safe to build an allocator on.
+    if (map_buffer_type == null) {
+        com1.write("[azura] FATAL: the memory map does not describe its own buffer\n");
+        cpu.haltForever();
+    }
+    if (map_buffer_type.? != @backingInt(shared.memory_type.loader_data)) {
+        com1.print("[azura] FATAL: the memory map buffer is {s}, expected loader_data\n", .{
+            shared.memoryTypeName(map_buffer_type.?),
+        });
+        cpu.haltForever();
+    }
+
+    com1.print("[azura] memory: conventional={d} MiB boot_services={d} MiB loader={d} KiB\n", .{
+        conventional_pages * page_size / (1024 * 1024),
+        boot_services_pages * page_size / (1024 * 1024),
+        loader_pages * page_size / 1024,
+    });
+    com1.print("[azura] memory map buffer: 0x{x} ({s})\n", .{
+        map_address,
+        shared.memoryTypeName(map_buffer_type.?),
+    });
 
     var shown: u32 = 0;
     index = 0;
     while (index < boot_info.memory_map_count and shown < memory_map_preview) : (index += 1) {
-        const offset = @as(usize, index) * boot_info.memory_map_descriptor_size;
-        const descriptor: *const shared.memory_descriptor = @ptrCast(@alignCast(
-            @as([*]const u8, @ptrFromInt(boot_info.memory_map)) + offset,
-        ));
+        const descriptor = descriptorAt(boot_info, index);
         com1.print("[azura]   map[{d}] {s} phys=0x{x} pages={d}\n", .{
             index,
             shared.memoryTypeName(descriptor.type),
@@ -229,6 +336,21 @@ fn printFramebuffer(boot_info: *shared.boot_info) void {
         return;
     }
     const fb = boot_info.framebuffer;
+
+    // The geometry is firmware data. A stride that is smaller than the row,
+    // or a buffer larger than the one the firmware described, would make the
+    // checksum read beyond the mapped framebuffer.
+    const total = @as(u64, fb.height) * @as(u64, fb.stride);
+    if (fb.base == 0 or fb.width == 0 or fb.height == 0 or fb.stride < fb.width or total > fb.size) {
+        com1.print("[azura] FATAL: framebuffer geometry is inconsistent: {d}x{d} stride={d} size={d}\n", .{
+            fb.width,
+            fb.height,
+            fb.stride,
+            fb.size,
+        });
+        cpu.haltForever();
+    }
+
     com1.print("[azura] framebuffer: {d}x{d} stride={d} base=0x{x} size={d}\n", .{
         fb.width,
         fb.height,
@@ -247,4 +369,64 @@ fn printFramebuffer(boot_info: *shared.boot_info) void {
     // kernel sees exactly the framebuffer the bootloader left behind.
     const sum = shared_framebuffer.checksum(fb.base, fb.stride, fb.height);
     com1.print("[azura] framebuffer checksum: 0x{x}\n", .{sum});
+}
+
+/// Write and read back a known value on the kernel stack.
+///
+/// The stack was allocated by the firmware from pool memory and is described
+/// by the memory map as loader data. This is the cheapest end to end proof
+/// that the pages are still mapped and writable after ExitBootServices, and
+/// that the stack pointer really points inside the range the bootloader
+/// reported.
+fn verifyStack(boot_info: *shared.boot_info) void {
+    if (boot_info.stack_base == 0 or boot_info.stack_base >= boot_info.stack_top) {
+        com1.print("[azura] FATAL: invalid stack bounds 0x{x}..0x{x}\n", .{
+            boot_info.stack_base,
+            boot_info.stack_top,
+        });
+        cpu.haltForever();
+    }
+
+    var probe: u64 = 0;
+    const slot: *volatile u64 = &probe;
+    slot.* = stack_probe_pattern;
+    const read_back = slot.*;
+    const address = @intFromPtr(&probe);
+    const end = address + @sizeOf(u64);
+
+    if (address < boot_info.stack_base or end < address or end > boot_info.stack_top) {
+        com1.print("[azura] FATAL: the stack probe 0x{x} is outside 0x{x}..0x{x}\n", .{
+            address,
+            boot_info.stack_base,
+            boot_info.stack_top,
+        });
+        cpu.haltForever();
+    }
+    if (read_back != stack_probe_pattern) {
+        com1.print("[azura] FATAL: stack write/read mismatch at 0x{x}\n", .{address});
+        cpu.haltForever();
+    }
+
+    com1.print("[azura] stack: writable at 0x{x}, inside 0x{x}..0x{x}\n", .{
+        address,
+        boot_info.stack_base,
+        boot_info.stack_top,
+    });
+}
+
+/// Read the IDTR back and refuse an empty table.
+///
+/// The entry addresses themselves were already checked by `idt.verifyEntries`
+/// when the table was installed. This check proves that the register still
+/// holds the table the kernel built.
+fn verifyIdt() void {
+    const descriptor = idt.readInstalledDescriptor();
+    com1.print("[azura] IDT: base=0x{x} limit={d}\n", .{
+        descriptor.base,
+        descriptor.limit,
+    });
+    if (descriptor.base == 0 or descriptor.limit == 0) {
+        com1.write("[azura] FATAL: the IDT register reads back empty\n");
+        cpu.haltForever();
+    }
 }

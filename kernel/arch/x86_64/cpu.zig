@@ -85,6 +85,17 @@ pub fn disableInterrupts() void {
     asm volatile ("cli");
 }
 
+/// Read the current page table base (CR3).
+///
+/// The kernel does not own the page tables yet: the value belongs to the
+/// firmware. It is read back and logged so the transition can be verified
+/// instead of assumed.
+pub fn readCr3() u64 {
+    return asm volatile ("movq %%cr3, %[value]"
+        : [value] "=r" (-> u64),
+    );
+}
+
 /// Halt the CPU until the next interrupt.
 pub fn halt() void {
     asm volatile ("hlt");

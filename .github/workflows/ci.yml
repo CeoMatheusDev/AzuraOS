@@ -93,6 +93,9 @@ jobs:
       - name: Run the QEMU fault handler test
         run: zig build fault-test
 
+      - name: Run the ExitBootServices retry test
+        run: zig build ebs-retry-test
+
       - name: Upload the boot evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -104,6 +107,7 @@ jobs:
             zig-out/test-boot/
             zig-out/test-fault-invalid_opcode/
             zig-out/test-fault-bad_segment/
+            zig-out/test-ebs-retry/
           if-no-files-found: warn
 
   formatting:

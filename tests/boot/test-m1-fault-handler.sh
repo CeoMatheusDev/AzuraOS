@@ -86,6 +86,18 @@ run_fault() {
     failures=$((failures + 1))
   fi
 
+  # The fault is injected after the handover, so the boot services must be
+  # gone and the post-ExitBootServices checks must have passed. Without this
+  # the exception could be reported by a kernel that never took the machine.
+  if ! grep -q -F "[azura] ExitBootServices: success" "$serial_log"; then
+    echo "FAIL ($mode): the bootloader did not exit the boot services" >&2
+    failures=$((failures + 1))
+  fi
+  if ! grep -q -F "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok framebuffer=ok memory_map=ok" "$serial_log"; then
+    echo "FAIL ($mode): the kernel did not report a healthy post-ExitBootServices environment" >&2
+    failures=$((failures + 1))
+  fi
+
   if ! grep -q -F "$expected_vector" "$serial_log"; then
     echo "FAIL ($mode): expected '$expected_vector'" >&2
     grep -a "KERNEL FAULT" "$serial_log" >&2 || true

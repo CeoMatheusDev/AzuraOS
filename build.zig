@@ -36,6 +36,16 @@ pub fn build(b: *std.Build) void {
     // Stage 1: UEFI bootloader
     // ------------------------------------------------------------------
 
+    // Test only. When set, the bootloader touches the pool between the final
+    // memory map snapshot and ExitBootServices, which changes the map and
+    // makes the key stale. The firmware must answer EFI_INVALID_PARAMETER and
+    // the bootloader must refresh the map and retry. A normal build leaves it
+    // off.
+    const stale_map_key = b.option(bool, "stale-map-key", "Invalidate the memory map key before ExitBootServices (test only)") orelse false;
+
+    const bootloader_options = b.addOptions();
+    bootloader_options.addOption(bool, "stale_map_key", stale_map_key);
+
     const bootloader_module = b.createModule(.{
         .root_source_file = b.path("boot/uefi/main.zig"),
         .target = b.resolveTargetQuery(.{
@@ -47,6 +57,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "shared", .module = shared_module },
             .{ .name = "com1", .module = com1_module },
             .{ .name = "framebuffer", .module = framebuffer_module },
+            .{ .name = "build_options", .module = bootloader_options.createModule() },
         },
     });
 
@@ -230,8 +241,14 @@ pub fn build(b: *std.Build) void {
     const fault_test_step = b.step("fault-test", "Run the kernel exception handler test in QEMU");
     fault_test_step.dependOn(&fault_test.step);
 
-    const test_step = b.step("test", "Run every test: unit tests, boot test and fault handler test");
+    const ebs_retry_test = b.addSystemCommand(&.{ "bash", "tests/boot/test-m2.2-ebs-retry.sh" });
+    ebs_retry_test.has_side_effects = true;
+    const ebs_retry_test_step = b.step("ebs-retry-test", "Run the ExitBootServices stale key retry test in QEMU");
+    ebs_retry_test_step.dependOn(&ebs_retry_test.step);
+
+    const test_step = b.step("test", "Run every test: unit tests, boot test, fault handler test and the ExitBootServices retry test");
     test_step.dependOn(unit_test_step);
     test_step.dependOn(boot_test_step);
     test_step.dependOn(&fault_test.step);
+    test_step.dependOn(&ebs_retry_test.step);
 }
