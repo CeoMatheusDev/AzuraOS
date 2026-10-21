@@ -23,6 +23,7 @@ const build_options = @import("build_options");
 const cpu = @import("arch/x86_64/cpu.zig");
 const gdt = @import("arch/x86_64/gdt.zig");
 const idt = @import("arch/x86_64/idt.zig");
+const tss = @import("arch/x86_64/tss.zig");
 
 /// Number of memory map entries printed in the boot log.
 const memory_map_preview = 8;
@@ -110,11 +111,11 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     // A failed LTR can raise #GP; keep the provisional IDT installed here.
     gdt.loadTaskRegister();
     const active_tr = gdt.readTaskRegister();
-    if (active_tr != 0x18) {
-        com1.print("[azura] FATAL: TR is 0x{x}, expected 0x18\n", .{active_tr});
+    if (active_tr != tss.selector) {
+        com1.print("[azura] FATAL: TR is 0x{x}, expected 0x{x}\n", .{ active_tr, tss.selector });
         cpu.haltForever();
     }
-    com1.write("[azura] TSS task register loaded (TR=0x18)\n");
+    com1.print("[azura] TSS task register loaded (TR=0x{x})\n", .{active_tr});
 
     // The handlers now run in the kernel's own code segment, so the IDT has
     // to name that selector.
