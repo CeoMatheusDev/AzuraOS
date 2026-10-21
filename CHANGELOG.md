@@ -26,8 +26,17 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
 - `kernel/arch/x86_64/idt.zig`: `verifyEntries`, which reads the bytes at
   the address every IDT entry names and checks that they are the beginning
   of the matching stub.
+- `kernel/arch/x86_64/exception.zig`: the exception model — the raw stack
+  frame the processor pushes, the decoded context, the classification of
+  the vectors that push an error code, and the vector names. It has no
+  inline assembly, so it is covered by the host unit tests.
+- `kernel/arch/x86_64/cpu.zig`: `loadInvalidSegmentSelector`, which raises a
+  #GP with a known error code, for the fault injection test.
 - `docs/adr/ADR-0004-kernel-gdt.md`: the GDT decision, with the descriptor
   layout and the failure that motivated the checks.
+- `docs/adr/ADR-0005-exception-frame-and-abi.md`: the exception frame
+  layout, the ABI fixup in the stub, and the two defects the review of
+  PR #1 found.
 
 ### Changed
 
@@ -42,6 +51,33 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
   the generated code.
 - The IDT table is explicitly aligned on 16 bytes, as the Intel SDM
   requires.
+- The exception stub aligns the stack pointer and clears the direction flag
+  before it calls the handler, because the processor guarantees neither on
+  an exception entry. Without it, the handler was entered with a
+  misaligned stack pointer for the vectors whose frame is 40 bytes long,
+  and a stricter build faulted inside the handler and reported the wrong
+  vector.
+- The exception frame is decoded per vector instead of at fixed offsets.
+  The error code is the **first** word of the frame, not the last, and
+  vector 13 (#GP) does push one in 64-bit mode.
+- The fault injection test injects two faults, one for each frame shape,
+  and requires the reported code selector to be the kernel's own.
+- The `zig fmt` check in CI covers `build.zig`, which was not covered and
+  did not pass.
+
+### Fixed
+
+- The exception handler misread the stack frame of every vector that pushes
+  an error code: it reported the error code as the RIP, the RIP as the CS
+  and the CS as the RFLAGS, and it never reported the error code itself.
+- The exception stub called the handler with a stack pointer that was not
+  16 byte aligned for half of the vectors, and with an undefined direction
+  flag.
+- The unit tests of `kernel/arch/x86_64/idt.zig` were never run by the CI:
+  the module was not part of the `unit-test` step. The exception model now
+  lives in `kernel/arch/x86_64/exception.zig`, which is.
+- The CI uploaded the fault test evidence from a directory that no longer
+  existed, so the serial logs of the fault test were not archived.
 
 ## [0.1.0] — 2026-10-20
 
