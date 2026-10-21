@@ -147,6 +147,7 @@ pub fn init() void {
         cpu.haltForever();
     }
     task_state.ist1 = stack_top;
+    // TSS must remain in mapped, writable memory for the CPU lifetime.
     const system_descriptor: [2]Entry = @bitCast(tss.descriptor(@intFromPtr(&task_state)));
     table[3] = system_descriptor[0];
     table[4] = system_descriptor[1];
@@ -191,6 +192,22 @@ pub fn init() void {
           [data] "i" (kernel_data_selector),
           [code] "i" (kernel_code_selector),
         : .{ .rax = true, .memory = true });
+}
+
+/// Load the Task Register after the kernel GDT has become active.
+/// The caller must verify GDTR/CS before invoking this privileged operation.
+pub fn loadTaskRegister() void {
+    asm volatile ("ltrw %[selector]"
+        :
+        : [selector] "r" (tss.selector),
+        : .{ .memory = true });
+}
+
+/// Read the current Task Register selector for boot diagnostics.
+pub fn readTaskRegister() u16 {
+    return asm volatile ("strw %[selector]"
+        : [selector] "=r" (-> u16),
+    );
 }
 
 /// Read the GDTR back, to prove which GDT the processor is using.
