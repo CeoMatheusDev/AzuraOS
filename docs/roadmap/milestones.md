@@ -37,15 +37,15 @@ State: **done**, evidence in `docs/testing/m1-boot-evidence.md`.
 **Acceptance:** stress tests of the allocator, controlled page faults, and no
 regression of the boot.
 
-In progress. M2.1 is merged into `main` (PR #1) and M2.2 is merged into
-`main` (PR #2, `02e5f3d`). M2.2b (TSS and IST) is implemented on
-`feat/m2.2b-tss-ist` and awaits merge.
+In progress. M2.1 is merged into `main` (PR #1), M2.2 is merged into `main`
+(PR #2, `02e5f3d`) and M2.2b (TSS and IST) is merged into `main` (PR #5,
+`c376528`).
 
 | Step | Content | State |
 | ---- | ------- | ----- |
 | M2.1 | Own GDT, own segments | done, `docs/adr/ADR-0004-kernel-gdt.md` |
 | M2.2 | `ExitBootServices` with the memory map key | done, merged in `02e5f3d`; evidence in `docs/testing/m2.2-exitbootservices-evidence.md`; ownership policy in `docs/adr/ADR-0007-memory-ownership-after-exitbootservices.md` |
-| M2.2b | TSS and IST stacks for `#NMI`, `#DF` and `#MC` | done on the branch, evidence in `docs/testing/m2.2b-tss-ist-evidence.md`; decision in `docs/adr/ADR-0008-tss-and-ist.md` |
+| M2.2b | TSS and IST stacks for `#NMI`, `#DF` and `#MC` | done, merged in `c376528`; evidence in `docs/testing/m2.2b-tss-ist-evidence.md`; decision in `docs/adr/ADR-0008-tss-and-ist.md` |
 | M2.3 | Physical memory manager, frame allocation and release | not started |
 | M2.4 | Own paging, W^X, NX, controlled page faults | not started |
 | M2.5 | Kernel heap, allocation and fragmentation tests | not started |

@@ -3,19 +3,19 @@ Data UTC: 2026-10-21 (data da atualização; hora não aferida)
 Projeto: AzuraOS
 Versão planejada: 0.1.0 (marco interno M0+M1); versão/tag publicada: nenhuma
 Arquitetura: x86_64 / UEFI; AArch64 e RISC-V futuros, não suportados
-Branch: feat/m2.2b-tss-ist (M2.2b); main em ecf4131 (registro do merge M2.2)
+Branch: main; M2.2b integrado em c376528 (PR #5); CI verde no run 39626656827
          origin = https://github.com/CeoMatheusDev/AzuraOS.git
-Último commit verificado em main: 02e5f3d "Merge pull request #2 from
-                          CeoMatheusDev/feat/m2-exit-boot-services";
-                          CI verde no run 39542990749. O commit ecf4131
-                          (docs) também tem CI verde, no run 39543328796.
+Último commit verificado em main: c376528 "Merge pull request #5 from
+                          CeoMatheusDev/feat/m2.2b-tss-ist";
+                          CI verde no run 39626656827.
 Última tag publicada: nenhuma
 Zig version: 0.17.0 VERIFICADA no Fedora 44 (zig version -> 0.17.0)
 QEMU: 10.2.2 VERIFICADO; OVMF: edk2-ovmf-20260812 VERIFICADO
 Estado geral: M1 CONCLUÍDO; M2.1 (GDT própria) CONCLUÍDO e integrado em main
               (PR #1, merge 1e87504); M2.2 (ExitBootServices) CONCLUÍDO e
               integrado em main (PR #2, merge 02e5f3d); M2.2b (TSS/IST)
-              IMPLEMENTADO na branch. Evidência M1:
+              CONCLUÍDO e integrado em main (PR #5, merge c376528).
+              Evidência M1:
               docs/testing/m1-boot-evidence.md; evidência M2.2:
               docs/testing/m2.2-exitbootservices-evidence.md; evidência M2.2b:
               docs/testing/m2.2b-tss-ist-evidence.md
@@ -704,6 +704,12 @@ PUBLICAÇÃO E CI
   Build and test PASS (3m24s-3m34s). O passo novo
   "Run the double fault IST test" rodou no CI e passou:
   IST 0x1077d0..0x10b7d0, handler 0x10b767.
+  Runs 39625614152 (push) e 39625624421 (PR), head d5185eb: ambos verdes.
+
+MERGE
+  PR #5 integrado em main com merge commit c376528, depois de CI verde em
+  main no run 39626656827 (zig fmt e Build and test PASS). Nenhuma tag ou
+  release foi criada. Rollback: "git revert -m 1 c376528".
 
 LIMITAÇÕES / RISCOS
   - Testado apenas em QEMU/OVMF; nenhum hardware físico foi exercitado.
@@ -718,6 +724,5 @@ LIMITAÇÕES / RISCOS
     (-Dstale-map-key=true), não por uma condição espontânea do firmware.
 
 PRÓXIMOS PASSOS
-  1. Aguardar a revisão e o merge do PR #5 (CI verde).
-  2. M2.3 (alocador físico) aplicando o ADR-0007.
-  3. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.
+  1. M2.3 (alocador físico) aplicando o ADR-0007.
+  2. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.

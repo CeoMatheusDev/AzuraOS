@@ -7,12 +7,12 @@ management, scheduler, IPC, drivers, userland, libraries and a desktop
 environment. Nothing is inherited from an existing kernel, and no
 compatibility is claimed unless it has been demonstrated.
 
-> **Status: M2.2b (TSS and IST) implemented on its branch (PR #5, green CI;
-> merge pending).** M2.2 is merged into `main`: the bootloader hands the
-> machine over with the boot services gone, and the kernel proves that the
-> stack, the GDT, the IDT, the framebuffer and the memory map survived. The
-> kernel now owns a TSS and routes `#NMI`, `#DF` and `#MC` to an alternate
-> stack. The next step is the physical memory manager (M2.3).
+> **Status: M2.2b (TSS and IST) merged into `main`.** M2.2 is merged into
+> `main`: the bootloader hands the machine over with the boot services gone,
+> and the kernel proves that the stack, the GDT, the IDT, the framebuffer and
+> the memory map survived. The kernel now owns a TSS and routes `#NMI`, `#DF`
+> and `#MC` to an alternate stack. The next step is the physical memory
+> manager (M2.3).
 
 ## Current state
 
@@ -22,8 +22,8 @@ compatibility is claimed unless it has been demonstrated.
 | M1 Boot | done | `docs/testing/m1-boot-evidence.md` |
 | M2.1 Kernel GDT | done, merged in `1e87504` (PR #1) | `docs/adr/ADR-0004-kernel-gdt.md` |
 | M2.2 `ExitBootServices` | done, merged in `02e5f3d` (PR #2) | `docs/testing/m2.2-exitbootservices-evidence.md` |
-| M2.2b TSS and IST | done on `feat/m2.2b-tss-ist` (PR #5, green CI); merge pending | `docs/testing/m2.2b-tss-ist-evidence.md` |
-| CI (GitHub Actions) | **passing** | run 39543328796 (main, `ecf4131`) |
+| M2.2b TSS and IST | done, merged in `c376528` (PR #5) | `docs/testing/m2.2b-tss-ist-evidence.md` |
+| CI (GitHub Actions) | **passing** | run 39626656827 (main, `c376528`) |
 | M2.3 Physical memory manager | not started | — |
 | M3 Execution | not started | — |
 
