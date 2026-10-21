@@ -52,8 +52,9 @@ If a step could not be executed, say so explicitly and say why.
   before it is used.
 * **No secrets** in the code, in the logs, in the prompts or in the
   documentation.
-* **No empty files as placeholders.** In particular, no empty `LICENSE`
-  file: the license is an open decision, not a formality.
+* **No empty files as placeholders.** In particular, never ship an empty
+  `LICENSE` file. The license was decided in ADR-0006 (Apache-2.0); changing
+  it is an ADR-level decision, not an edit.
 * **Small commits**, focused and descriptive. No drive by refactoring and no
   mass reformatting.
 * **Do not publish.** Creating a tag, a release or a remote repository

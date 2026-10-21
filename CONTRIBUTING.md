@@ -83,7 +83,16 @@ Do not open a public issue. See `SECURITY.md`.
 
 ## Licensing
 
-The project has not chosen a license yet; the decision is tracked in
-`docs/STATUS.txt`. By contributing you agree that your contribution will be
-released under the license the project adopts. If that is a problem for
-you, please say so in the issue before starting.
+AzuraOS is licensed under the Apache License, Version 2.0; see `LICENSE` and
+`docs/adr/ADR-0006-apache-2-0-license.md`.
+
+Contributions are accepted under the same license. As Apache-2.0 section 5
+states, a contribution intentionally submitted for inclusion in the project
+is licensed under the terms of the license, without additional terms, unless
+you explicitly state otherwise in writing. There is no separate contributor
+license agreement to sign.
+
+A contribution that copies code from another project must say so in the pull
+request, name the source and its license, and keep the notices that license
+requires. Code under a license that is incompatible with Apache-2.0 is not
+linked into the kernel or the bootloader.

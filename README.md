@@ -137,6 +137,8 @@ docs/testing/       measured evidence
   layout that must not be got wrong.
 * `docs/adr/ADR-0005-exception-frame-and-abi.md` — the exception frame, the
   ABI fixup in the stub, and the two defects the review of PR #1 found.
+* `docs/adr/ADR-0006-apache-2-0-license.md` — the license decision, the
+  rejected alternatives and the dependency policy.
 * `docs/specs/boot-protocol-v1.md` — field by field specification.
 * `docs/testing/m1-boot-evidence.md` — the measured evidence of M1.
 * `docs/STATUS.txt` — the running status log.
@@ -158,6 +160,11 @@ docs/testing/       measured evidence
 
 ## License
 
-Not yet chosen. The choice is tracked as an open item in
-`docs/STATUS.txt`; no empty `LICENSE` file is shipped, and no
-copyright is claimed over the code until the decision is made.
+AzuraOS is licensed under the [Apache License, Version 2.0](LICENSE).
+The full text is in `LICENSE`, the attribution notice is in `NOTICE`, and
+the decision, with the alternatives that were rejected and the consequences
+for dependencies and compatibility layers, is recorded in
+`docs/adr/ADR-0006-apache-2-0-license.md`.
+
+Contributions are accepted under the same license, without a separate
+contributor license agreement; see `CONTRIBUTING.md`.

@@ -25,7 +25,8 @@ build.zig, build.zig.zon, imagem ESP, testes automatizados de boot e de falha.
 Implementado e verificado: docs/TOOLCHAIN.md, tools/check-toolchain.sh.
 Não iniciado: M2 (GDT/páginas próprias, ExitBootServices, alocadores, drivers),
 M3 (processos, escalonador, syscalls, IPC) e os demais marcos.
-Licença: decisão pendente. Repositório Git local: não inicializado neste diretório.
+Licença: Apache-2.0 (ADR-0006); LICENSE e NOTICE criados em 2026-10-21.
+Repositório Git inicializado e publicado em origin.
 
 ALTERAÇÕES E DECISÕES
 Criados docs/TOOLCHAIN.md e tools/check-toolchain.sh; atualizado docs/STATUS.txt.
@@ -549,3 +550,31 @@ PENDÊNCIAS / PRÓXIMOS PASSOS:
 
 ROLLBACK: o merge pode ser revertido com "git revert -m 1 1e87504". Nenhuma
 tag ou release foi criada.
+
+================================================================================
+2026-10-21 — LICENÇA Apache-2.0
+================================================================================
+
+DECISÃO
+  Apache-2.0, decisão do responsável, registrada em ADR-0006, com as
+  alternativas rejeitadas (MIT, GPL-2.0-or-later, licença dupla) e as
+  consequências para dependências e camadas de compatibilidade.
+  LICENSE = texto canônico da ASF, sem edição
+            sha256 cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+  NOTICE  = atribuição ("Copyright 2026 The AzuraOS Authors").
+  CONTRIBUTING.md: contribuições entram sob a mesma licença, sem CLA, pela
+  seção 5 da Apache-2.0; dependências precisam ser compatíveis, e código
+  incompatível não é ligado ao kernel nem ao bootloader.
+  AGENTS.md: a regra do LICENSE vazio foi substituída pela decisão registrada.
+  README.md: seção License reescrita e ADR-0006 acrescentado à lista.
+  A tag v0.1.0 deixa de estar bloqueada pela licença; continua bloqueada pelo
+  marco.
+
+VALIDAÇÃO
+  sha256sum LICENSE confere o hash do texto canônico publicado pela ASF.
+  A árvore com LICENSE, NOTICE e ADR-0006 passou por
+  zig fmt --check build.zig boot kernel shared tools -> PASS e
+  zig build test -> PASS (unit + boot + fault).
+
+ROLLBACK: nenhuma tag ou release foi criada; o LICENSE pode ser removido sem
+afetar o código.

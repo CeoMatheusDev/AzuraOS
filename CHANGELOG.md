@@ -37,6 +37,9 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
 - `docs/adr/ADR-0005-exception-frame-and-abi.md`: the exception frame
   layout, the ABI fixup in the stub, and the two defects the review of
   PR #1 found.
+- `LICENSE` and `NOTICE`: the Apache License 2.0, adopted in
+  `docs/adr/ADR-0006-apache-2-0-license.md`. `LICENSE` holds the canonical
+  text published by the ASF, unmodified.
 
 ### Changed
 
@@ -64,6 +67,9 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
   and requires the reported code selector to be the kernel's own.
 - The `zig fmt` check in CI covers `build.zig`, which was not covered and
   did not pass.
+- The license is decided: `README.md`, `CONTRIBUTING.md` and `AGENTS.md`
+  state the Apache-2.0 license and the contribution and dependency policy
+  instead of describing the choice as pending.
 
 ### Fixed
 
