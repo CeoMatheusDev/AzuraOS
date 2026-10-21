@@ -3,19 +3,26 @@
 //! Scope (M1): the kernel installs an IDT that catches every CPU exception
 //! (vectors 0-31), prints a diagnostic to the serial port and halts the
 //! machine. Without this, any kernel bug would escalate to a triple fault
-//! and silently reboot the machine, which would turn a test failure into an
-//! unexplained timeout.
+//! and silently reboot the machine, which would turn a test failure into
+//! an unexplained timeout.
 //!
 //! Hardware interrupts (vectors 32 and above) are deliberately NOT
 //! installed: the kernel runs with interrupts disabled in M1, and a
 //! half-implemented interrupt controller would only produce noise.
 //!
-//! The kernel still executes on the GDT chosen by the firmware; only the IDT
-//! is ours. Installing our own GDT is M2 work.
+//! The kernel installs the IDT twice: once with the selector that is
+//! active when the kernel starts, so that a fault during the GDT switch is
+//! still reported, and once with the kernel's own code selector after the
+//! switch. See `install`.
+//!
+//! The frame layout and the classification of the vectors are in
+//! `exception.zig`, which holds no inline assembly and is verified by the
+//! host unit tests. The part of this module that touches the processor is
+//! verified by the QEMU boot and fault tests.
 
-const std = @import("std");
 const com1 = @import("com1");
 const cpu = @import("cpu.zig");
+const exception = @import("exception.zig");
 
 /// One IDT entry. 16 bytes, as required by the 64-bit IDT format.
 pub const Entry = extern struct {
@@ -29,20 +36,11 @@ pub const Entry = extern struct {
     reserved: u32,
 };
 
-/// The CPU pushed stack frame in 64-bit mode, without a privilege change.
-///
-/// Layout (Intel SDM Vol. 3, 6.14.5):
-///   [rsp+0]  RIP
-///   [rsp+8]  CS
-///   [rsp+16] RFLAGS
-///   [rsp+24] error code, only for the vectors listed in `hasErrorCode`
-///   [rsp+32] RSP, only when the privilege level changed
-///   [rsp+40] SS,  only when the privilege level changed
-pub const Frame = extern struct {
-    rip: u64,
-    cs: u64,
-    rflags: u64,
-};
+/// The CPU-pushed exception frame. See `exception.zig`.
+pub const Frame = exception.Frame;
+
+/// The decoded context of a fault. See `exception.zig`.
+pub const Context = exception.Context;
 
 /// Present, DPL 0, 64-bit interrupt gate.
 const gate_type: u8 = 0x8E;
@@ -53,7 +51,12 @@ const vector_count = 256;
 /// Number of CPU exception vectors handled by the kernel.
 const exception_vector_count = 32;
 
-var table: [vector_count]Entry = @splat(.{
+/// The IDT table.
+///
+/// The Intel SDM requires the IDT base address to be aligned on a 16 byte
+/// boundary; the alignment is therefore explicit and not left to the
+/// linker.
+var table: [vector_count]Entry align(16) = @splat(.{
     .offset_low = 0,
     .selector = 0,
     .ist = 0,
@@ -80,21 +83,21 @@ var handler_address: usize = 0;
 
 /// Install the IDT.
 ///
+/// `code_selector` is the selector of the code segment the handlers run in.
+/// It must be a selector of the GDT that is currently installed; after the
+/// kernel installs its own GDT that is `gdt.kernel_code_selector`.
+///
 /// Must be called with interrupts disabled. After this call every CPU
 /// exception lands in `commonHandler` instead of escalating to a triple
 /// fault.
-pub fn install() void {
-    handler_address = @intFromPtr(&commonHandler);
-
-    // The firmware's code segment selector is reused so the kernel does not
-    // depend on a GDT layout it does not own yet.
-    const selector = cpu.codeSelector();
+pub fn install(code_selector: u16) void {
+    handler_address = @intFromPtr(&azuraCommonHandler);
 
     inline for (0..exception_vector_count) |vector| {
         const stub = makeStub(vector);
         table[vector] = .{
             .offset_low = @truncate(stub),
-            .selector = selector,
+            .selector = code_selector,
             .ist = 0,
             .type_attr = gate_type,
             .offset_middle = @truncate(stub >> 16),
@@ -118,12 +121,47 @@ pub fn install() void {
 /// Build the per-vector trampoline.
 ///
 /// Each vector needs its own stub because the CPU does not report which
-/// vector fired. The stub pushes the vector number and hands the CPU's stack
-/// frame to the common handler.
+/// vector fired. The stub hands the vector number and the pointer to the
+/// CPU's stack frame to the common handler.
+///
+/// The handler is reached through its exported symbol instead of through a
+/// pointer held in a register: an inline assembly operand that needs a
+/// register makes the compiler emit a setup sequence, and the address of a
+/// naked function that has one does not reliably point at the start of the
+/// generated code. The kernel verifies the resulting addresses at boot; see
+/// `verifyEntries`.
 ///
 /// The stub is a naked function so that the CPU's stack frame is still the
-/// top of the stack when `commonHandler` is entered: the handler reads
+/// top of the stack when the handler is entered: the handler reads
 /// RIP/CS/RFLAGS relative to that pointer.
+///
+/// The stub also fixes up the two conditions the System V ABI imposes on
+/// the callee, which the processor does not guarantee on an exception
+/// entry:
+///
+///   * the stack alignment. Immediately before the `call`, `RSP` must be a
+///     multiple of 16; at the first instruction of the callee, after the
+///     return address has been pushed, `RSP % 16` must be 8. The processor
+///     aligns the stack pointer to a 16 byte boundary BEFORE pushing the
+///     frame (Intel SDM Vol. 3A, 7.14.2), and the frame is 40 bytes long
+///     for the vectors that push no error code and 48 bytes long for the
+///     vectors that push one. The parity of the frame base therefore
+///     depends on the vector, and without the fix the handler would be
+///     entered with a misaligned stack pointer for one of the two classes.
+///     Any `movaps` to a 16 byte aligned object inside the handler would
+///     then fault with #GP and hide the original fault;
+///   * the direction flag must be clear. The processor does not touch it on
+///     an exception entry, and a faulting instruction may well have set it.
+///
+/// The stub clobbers RDI, RSI, RSP and the flags, and the clobber list below
+/// names them so that the contract is machine checked rather than only
+/// described. Nothing has to be preserved, because the stub never returns:
+/// the handler halts the machine, and the context that was interrupted is
+/// never resumed. The ABI's caller saved rules are therefore not the reason
+/// the list is short — the reason is that there is no caller to return to. A
+/// build step that did try to resume the interrupted context would have to
+/// save and restore the whole register state first, and this stub would not
+/// be enough.
 fn makeStub(comptime vector: u8) usize {
     const Stub = struct {
         const vector_id: u8 = vector;
@@ -132,117 +170,113 @@ fn makeStub(comptime vector: u8) usize {
             asm volatile (
                 \\ movq %[v], %%rdi        // vector number
                 \\ movq %%rsp, %%rsi       // pointer to the CPU's stack frame
-                \\ movq %[handler], %%r11
-                \\ callq *%%r11
+                \\ andq $-16, %%rsp        // RSP % 16 == 0 immediately before the call
+                \\ cld                    // the ABI demands a clear direction flag
+                \\ callq azuraCommonHandler
                 :
                 : [v] "i" (vector_id),
-                  [handler] "{r11}" (handler_address),
-                : .{ .memory = true });
+                : .{ .memory = true, .cc = true, .rdi = true, .rsi = true, .rsp = true });
         }
     };
     return @intFromPtr(&Stub.stub);
 }
 
+/// Read the IDT register back, to prove which table the processor uses.
+pub fn readInstalledDescriptor() cpu.Descriptor {
+    return cpu.readIdt();
+}
+
+/// Read back the state of the installed table, for diagnostics.
+///
+/// The values are what the processor actually sees, not what the code
+/// believes it wrote.
+pub const Diagnostics = struct {
+    /// Address of the common handler.
+    handler: usize,
+    /// Address of the stub of the given vector.
+    stub: usize,
+    /// The raw entry of the given vector.
+    entry: Entry,
+};
+
+/// Collect the diagnostics of the installed table.
+pub fn diagnostics(comptime vector: u8) Diagnostics {
+    return .{
+        .handler = handler_address,
+        .stub = makeStub(vector),
+        .entry = table[vector],
+    };
+}
+
+/// The instruction that loads the vector number into the first argument
+/// register: `movq $<vector>, %rdi`, encoded as `48 c7 c7 <vector>`.
+const stub_vector_opcode = [_]u8{ 0x48, 0xc7, 0xc7 };
+
+/// The instructions that follow the vector immediate in every stub.
+///
+///   `48 89 e6`      `movq %rsp, %rsi`
+///   `48 83 e4 f0`   `andq $-16, %rsp`
+///   `fc`            `cld`
+const stub_fixup = [_]u8{ 0x48, 0x89, 0xe6, 0x48, 0x83, 0xe4, 0xf0, 0xfc };
+
+/// Verify that every entry points at the beginning in its stub.
+///
+/// Reading the bytes the stub must start with, at the address the IDT
+/// names, proves that the entry points at the start of the stub and not
+/// into the middle of it, which is the failure mode this check exists for.
+///
+/// The check also covers the stack alignment fixup, so a stub that lost it
+/// would be reported at boot instead of corrupting the handler's stack
+/// alignment.
+///
+/// This check runs in the kernel and not in the host unit tests: Zig 0.17
+/// refuses to compile an inline assembly label reference in a test build,
+/// so the stub cannot be instantiated on the host.
+///
+/// Returns the vector of the first entry that is wrong, or null when every
+/// entry is correct.
+pub fn verifyEntries() ?u8 {
+    inline for (0..exception_vector_count) |vector| {
+        const address = makeStub(vector);
+        const bytes: [*]const u8 = @ptrFromInt(address);
+
+        for (stub_vector_opcode, 0..) |expected, index| {
+            if (bytes[index] != expected) return @intCast(vector);
+        }
+        const immediate: u32 = @as(u32, bytes[3]) |
+            (@as(u32, bytes[4]) << 8) |
+            (@as(u32, bytes[5]) << 16) |
+            (@as(u32, bytes[6]) << 24);
+        if (immediate != vector) return @intCast(vector);
+
+        for (stub_fixup, 0..) |expected, index| {
+            if (bytes[7 + index] != expected) return @intCast(vector);
+        }
+    }
+    return null;
+}
+
 /// Common exception handler. Never returns: the machine is halted so the
 /// failure is visible in the serial log instead of restarting the boot.
-fn commonHandler(vector: u8, frame: *const Frame) callconv(.c) void {
+///
+/// Exported so that the per-vector stubs can call it by name.
+///
+/// Called with the System V C ABI, so the stub must have left the stack
+/// pointer 16 byte aligned and the direction flag clear. See `makeStub`.
+export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void {
+    const context = exception.decodeFrame(vector, frame);
     com1.print("[azura] KERNEL FAULT: vector {d} ({s})\n", .{
         vector,
-        vectorName(vector),
+        exception.vectorName(vector),
     });
     com1.print("[azura] KERNEL FAULT: rip=0x{x} cs=0x{x} rflags=0x{x}\n", .{
-        frame.rip,
-        frame.cs,
-        frame.rflags,
+        context.rip,
+        context.cs,
+        context.rflags,
     });
-    if (hasErrorCode(vector)) {
-        const frame_bytes: [*]const u8 = @ptrCast(frame);
-        com1.print("[azura] KERNEL FAULT: error_code=0x{x}\n", .{readU64At(frame_bytes, 24)});
+    if (context.error_code) |error_code| {
+        com1.print("[azura] KERNEL FAULT: error_code=0x{x}\n", .{error_code});
     }
     com1.write("[azura] KERNEL FAULT: machine halted\n");
     cpu.haltForever();
-}
-
-/// Vectors that always push an error code.
-///
-/// Vector 13 (#GP) is deliberately excluded: the error code is only pushed
-/// when the fault was caused by an instruction fetch, so the frame layout is
-/// ambiguous for that vector.
-fn hasErrorCode(vector: u8) bool {
-    return switch (vector) {
-        8, 10, 11, 12, 14, 17, 21, 29, 30 => true,
-        else => false,
-    };
-}
-
-/// Human readable name of a CPU exception vector.
-pub fn vectorName(vector: u8) []const u8 {
-    return switch (vector) {
-        0 => "divide error",
-        1 => "debug",
-        2 => "non-maskable interrupt",
-        3 => "breakpoint",
-        4 => "overflow",
-        5 => "bound range exceeded",
-        6 => "invalid opcode",
-        7 => "device not available",
-        8 => "double fault",
-        9 => "coprocessor segment overrun",
-        10 => "invalid TSS",
-        11 => "segment not present",
-        12 => "stack-segment fault",
-        13 => "general protection fault",
-        14 => "page fault",
-        15 => "reserved",
-        16 => "x87 floating point exception",
-        17 => "alignment check",
-        18 => "machine check",
-        19 => "SIMD floating point exception",
-        20 => "virtualization exception",
-        21 => "control protection exception",
-        28 => "hypervisor injection",
-        29 => "VMM communication exception",
-        30 => "security exception",
-        else => "unknown",
-    };
-}
-
-/// Read a little endian u64 from an arbitrary byte address.
-///
-/// The frame is not guaranteed to be 8 byte aligned for every vector, so the
-/// value is assembled byte by byte instead of dereferencing a u64 pointer.
-fn readU64At(bytes: [*]const u8, offset: usize) u64 {
-    var value: u64 = 0;
-    var index: usize = 0;
-    while (index < 8) : (index += 1) {
-        value |= @as(u64, bytes[offset + index]) << @intCast(index * 8);
-    }
-    return value;
-}
-
-// --- Unit tests -------------------------------------------------------------
-
-const testing = std.testing;
-
-test "vector names are defined for the classic exceptions" {
-    try testing.expectEqualStrings("page fault", vectorName(14));
-    try testing.expectEqualStrings("general protection fault", vectorName(13));
-    try testing.expectEqualStrings("invalid opcode", vectorName(6));
-    try testing.expectEqualStrings("unknown", vectorName(200));
-}
-
-test "error code presence matches the Intel manual" {
-    try testing.expect(hasErrorCode(14)); // #PF
-    try testing.expect(hasErrorCode(8)); // #DF
-    try testing.expect(!hasErrorCode(13)); // #GP is ambiguous
-    try testing.expect(!hasErrorCode(6)); // #UD
-    try testing.expect(!hasErrorCode(0)); // #DE
-}
-
-test "reads an unaligned u64" {
-    const bytes = [_]u8{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0xff };
-    try testing.expectEqual(
-        @as(u64, 0x0807_0605_0403_0201),
-        readU64At(&bytes, 1),
-    );
 }

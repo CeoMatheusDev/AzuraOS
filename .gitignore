@@ -23,6 +23,9 @@ __pycache__/
 .idea/
 .vscode/
 
+# KDE Dolphin
+.directory
+
 # Python
 __pycache__/
 *.py[cod]

@@ -5,12 +5,13 @@ Versão planejada: 0.1.0 (marco interno M0+M1); versão/tag publicada: nenhuma
 Arquitetura: x86_64 / UEFI; AArch64 e RISC-V futuros, não suportados
 Branch: main; repositório Git inicializado e publicado pelo responsável durante
          a sessão (origin = https://github.com/CeoMatheusDev/AzuraOS.git)
-Último commit verificado: 3db147f "chore: ignore generated files and build artifacts"
+Último commit verificado: 97e3a70 "docs: record the first successful CI execution"
+                          (branch feat/m2-kernel-ownership)
 Última tag publicada: nenhuma
 Zig version: 0.17.0 VERIFICADA no Fedora 44 (zig version -> 0.17.0)
 QEMU: 10.2.2 VERIFICADO; OVMF: edk2-ovmf-20260812 VERIFICADO
-Estado geral: M1 CONCLUÍDO — boot UEFI x86_64 com log serial e framebuffer,
-              verificado em QEMU/OVMF. Evidência: docs/testing/m1-boot-evidence.md
+Estado geral: M1 CONCLUÍDO e M2.1 (GDT própria) EM ANDAMENTO no branch
+              feat/m2-kernel-ownership. Evidência M1: docs/testing/m1-boot-evidence.md
 
 OBJETIVO DA TAREFA
 M0.1: estabelecer requisitos de toolchain, estratégia de build reproduzível e inventário Fedora.
@@ -265,3 +266,233 @@ PENDÊNCIAS / PRÓXIMOS PASSOS (em ordem):
 
 ROLLBACK: esta etapa só criou e alterou arquivos do repositório local. Nenhuma
 configuração externa, nenhum repositório remoto, nenhuma tag e nenhuma release.
+
+
+ATUALIZAÇÃO M2.1 — 2026-10-20 — GDT PRÓPRIA DO KERNEL (EM ANDAMENTO)
+OBJETIVO: o kernel deixa de depender do GDT do firmware e passa a instalar o
+próprio, com seletor de código 0x08 e de dados 0x10.
+
+ESTADO: IMPLEMENTADO E VERIFICADO em QEMU/OVMF. Branch: feat/m2-kernel-ownership
+(main permanece a referência funcional do M1). Commit local, SEM push.
+
+IMPLEMENTADO:
+  kernel/arch/x86_64/gdt.zig  GDT do kernel: nulo, código 0x08 (long mode),
+                               dados 0x10, slot 0x18 reservado para a TSS e uma
+                               cópia do segmento de código no seletor que o
+                               firmware usava, para que a IDT instalada antes da
+                               troca continue válida durante a transição.
+  kernel/arch/x86_64/cpu.zig   leitura do IDTR e do GDTR de volta, extraindo os
+                               valores dentro do bloco de assembly.
+  kernel/arch/x86_64/idt.zig   verifyEntries: confere os bytes no endereço
+                               apontado por cada entrada da IDT.
+  kernel/main.zig              a IDT é instalada antes da troca do GDT (para
+                               que uma falha durante a troca seja reportada em
+                               vez de reiniciar a máquina) e reinstalada com o
+                               seletor 0x08 depois.
+  docs/adr/ADR-0004-kernel-gdt.md
+
+VALIDAÇÃO REAL EXECUTADA NESTA SESSÃO:
+  zig test kernel/arch/x86_64/gdt.zig            -> 6 testes, todos PASS.
+  zig build unit-test                             -> PASS (ELF, framebuffer, GDT).
+  zig build boot-test                             -> PASS (exit 0).
+  zig build fault-test                            -> PASS (exit 0).
+  O log de boot mostra: "GDT: code selector=0x8", "GDT active, the segments are
+  the kernel's own" e, na injeção de falha, "KERNEL FAULT: vector 6" com
+  cs=0x8 — a exceção é reportada com o GDT do kernel em uso.
+
+BUGS REAIS ENCONTRADOS NESTA ETAPA (relevantes para revisão futura):
+  1. Os nibbles do byte de flags do descritor de GDT estavam trocados: o limite
+     usava 0xfa/0xfc em vez de 0xaf/0xcf. O resultado era um limite de 44 MiB
+     em vez de 4 GiB. Como o kernel e a pilha abaixo de 44 MiB funcionam, o
+     boot passava e a falha só aparecia ao tomar uma exceção: o processador
+     empurrava o quadro da exceção na pilha do kernel, acima do limite, e a
+     máquina reiniciava em laço. Ver ADR-0004. Corrigido, com testes unitários
+     por nibble e um teste que calcula o limite efetivo.
+  2. Ler o IDTR/GDTR gravando num operando de memória e lendo essa memória do
+     Zig não é confiável: o compilador mantinha uma cópia separada do buffer e
+     devolvia a cópia, não o que o processador escreveu. Agora os valores são
+     extraídos dentro do próprio bloco de assembly.
+  3. O stub de exceção usava um operando de assembly que exigia um registrador;
+     o compilador emitia uma sequência de preparação e o endereço da função
+     "naked" passava a apontar para o meio do código gerado. O stub agora chama
+     o handler pelo símbolo exportado, e verifyEntries confere os bytes de cada
+     entrada no boot.
+  4. A tabela da IDT precisa estar alinhada em 16 bytes (Intel SDM); o
+     alinhamento agora é explícito.
+
+PRÓXIMOS PASSOS DE M2 (na ordem do plano acordado):
+  M2.2  ExitBootServices com a chave do mapa de memória, páginas reservadas e a
+       garantia de que código, pilha, tabelas e framebuffer permanecem
+       acessíveis.
+  M2.3  Gerenciador de memória física (frames) com alocação e liberação testadas.
+  M2.4  Paginação própria (PML4/PDPT/PD/PT), W^X, NX e page faults controlados.
+  M2.5  Heap do kernel com testes de alocação, fragmentação e limites.
+  M2.6  Timer: relógio monotônico e interrupções verificadas.
+  M2.7  Drivers de serial e framebuffer sem dependência do firmware.
+  M2.8  Regressão: o M1 continua funcional.
+
+ATUALIZAÇÃO M2.1 — 2026-10-20 — PRIMEIRA EXECUÇÃO REAL DO CI
+PUBLICAÇÃO: branch feat/m2-kernel-ownership publicada em
+origin/feat/m2-kernel-ownership; PR #1 aberto contra main
+(https://github.com/CeoMatheusDev/AzuraOS/pull/1). main permanece em 548388e.
+
+ACHADO REAL: a primeira execução do CI no GitHub Actions FALHOU, e a causa foi
+um defeito real do próprio CI, não do kernel. O workflow instalava o pacote
+"zig" do Fedora 44, que é a versão 0.16.0, enquanto o projeto exige 0.17.0
+exatamente (docs/TOOLCHAIN.md). Com 0.16.0 o build parava em
+"invalid builtin function: '@backingInt'".
+
+CORRECOES:
+  1. O CI agora baixa o Zig 0.17.0 oficial, confere o SHA-256 com
+     tools/verify-zig-release.sh, o mesmo script que o desenvolvedor usa, e
+     falha se "zig version" não for 0.17.0. O pacote da distribuição deixou
+     de ser usado. A primeira tentativa apontava o GITHUB_PATH para um
+     diretório inexistente: o tarball extrai para um diretório com o nome do
+     arquivo, não "zig-<versao>".
+  2. A segunda "correção" foi na verdade um erro de análise e foi revertida
+     no commit seguinte: @backingInt NÃO é um builtin obsoleto. No Zig
+     0.17.0 ele é a grafia canônica, e o próprio "zig fmt" normaliza
+     @intFromEnum para @backingInt. A falha do CI vinha do Zig 0.16.0 do
+     Fedora, onde o builtin não existe com nenhum dos dois nomes. A
+     correção é o pin da toolchain; o código deve continuar na grafia do
+     0.17.0, que é o que o formatador exige e o que o CI confere.
+
+CONSEQUENCIA: "zig fmt --check" passa a ser uma guarda real: foi ele que
+detectou a divergência de grafia na primeira execução do CI.
+
+RESULTADO: o CI PASSOU pela primeira vez, com execução real no GitHub Actions
+(workflow run 39511186005, PR #1). Evidência do log:
+  - "OK: SHA-256 matches Zig 0.17.0 official release index"
+  - "zig version: 0.17.0"
+  - os 5 scripts de toolchain/ELF: PASS
+  - "PASS: the M1 boot sequence completed in QEMU/OVMF"
+  - "PASS: the kernel exception handler reported the fault and halted the machine"
+  - "zig fmt --check": PASS
+O item "CI no GitHub Actions: sem execução confirmada" está RESOLVIDO: houve
+execução bem-sucedida, com os jobs "Build and test" e "zig fmt" verdes.
+
+LIMITAÇÕES CONHECIDAS:
+  - O kernel ainda usa as tabelas de página do firmware e não chamou
+    ExitBootServices (M2.2).
+  - Não há TSS ainda: o seletor 0x18 está reservado e o campo IST da IDT vale
+    zero, portanto uma falha na pilha do kernel ainda não tem uma pilha
+    alternativa.
+  - O teste continua sendo em x86_64 emulado; nada foi validado em hardware real.
+
+ATUALIZAÇÃO M2.1 — 2026-10-20 — REVISÃO DO PR #1 E CORREÇÃO DO TRATAMENTO DE EXCEÇÕES
+OBJETIVO: revisar o PR #1 (feat/m2-kernel-ownership) antes do merge: GDT, IDT,
+assembly, linker e solidez do CI. A revisão encontrou dois defeitos reais no
+tratamento de exceções, ambos corrigidos e verificados nesta etapa.
+
+ESTADO: IMPLEMENTADO E VERIFICADO em QEMU/OVMF. Branch: feat/m2-kernel-ownership.
+Commit local, SEM push (sem autorização de merge).
+
+DEFEITO 1 — O QUADRO DA EXCEÇÃO ERA LIDO COM DESLOCAMENTO FIXO
+  O quadro empurrado pelo processador tem duas formas (Intel SDM Vol. 3A, 6.14.5
+  e 7.14.2): sem código de erro são 5 palavras [RIP][CS][RFLAGS][RSP][SS]; com
+  código de erro são 6 palavras e o código de erro ocupa a PRIMEIRA palavra,
+  abaixo do RIP. O código do M1 assumia um único layout e lia o código de erro
+  no offset 24, ou seja, na última palavra. Além disso, o conjunto de vetores
+  que empurram código de erro estava errado: o vetor 13 (#GP) foi excluído, mas
+  a regra "só empurra código de erro em falta de busca de instrução" é do modo
+  legado; em 64 bits o #GP SEMPRE empurra código de erro (SDM Vol. 3A, 7.3.1,
+  Tabela 7-1).
+  Efeito observável: o handler reportava o código de erro como RIP, o RIP como
+  CS e o CS como RFLAGS.
+  CORREÇÃO: o modelo de exceção passou a ser decodificado por vetor.
+  kernel/arch/x86_64/exception.zig (novo) tem o quadro cru, o contexto
+  decodificado, decodeFrame e hasErrorCode; é lógica pura, sem assembly, e por
+  isso entra nos testes unitários do host.
+
+DEFEITO 2 — O STUB NÃO CUMPRIA A ABI QUE ELE ATRAVESSA
+  A ABI System V impõe duas condições na chamada: imediatamente ANTES do
+  call, RSP deve ser múltiplo de 16; na PRIMEIRA instrução do chamado, depois
+  que o endereço de retorno foi empurrado, RSP % 16 == 8. Além disso, DF deve
+  estar zerado. O processador não garante nenhuma delas na entrada de uma
+  exceção: ele alinha a pilha em 16 bytes ANTES de empurrar o
+  quadro (SDM Vol. 3A, 7.14.2), e o quadro tem 40 bytes nos vetores sem código
+  de erro e 48 bytes nos demais, de modo que a paridade da base depende do
+  vetor. O DF o processador nem toca.
+  Efeito observável: com os fontes ORIGINAIS e build ReleaseSafe, o próprio
+  handler falhava com #GP antes de reportar qualquer coisa, e a falha era
+  reportada como "vector 13" em vez do "vector 6" que realmente aconteceu: a
+  falha original ficava escondida por uma falha de quem a reportava.
+  CORREÇÃO: o stub alinha a pilha e zera o DF antes de chamar o handler.
+  Os bytes desse prólogo fazem parte do contrato e são conferidos no boot por
+  idt.verifyEntries: um stub que perdesse o ajuste pararia a máquina no boot
+  com diagnóstico, em vez de corromper silenciosamente o alinhamento.
+
+DEFEITO 3 (ACHADO NA REVISÃO DO CI) — TESTES DE IDT NUNCA RODARAM NO CI
+  O passo unit-test do build.zig cobria elf_loader.zig, framebuffer.zig e
+  gdt.zig. O idt.zig nunca foi incluído: os testes que ele tinha (nomes de
+  vetor e presença de código de erro) estavam no código e nunca executados.
+  CORREÇÃO: com o modelo de exceção extraído para exception.zig, ele passou a
+  ser coberto. O idt.zig em si não pode ser testado no host: o Zig 0.17 recusa
+  compilar referência a rótulo dentro de assembly inline em build de teste, de
+  modo que os stubs não podem ser instanciados no host. essa verificação fica
+  no kernel e é exercitada pelo teste de boot do QEMU.
+
+DEFEITO 4 (ACHADO NA REVISÃO DO CI) — build.zig FORA DO "zig fmt --check"
+  A lista do CI era "zig fmt --check boot kernel shared tools": build.zig não
+  era conferido e hoje não passaria. Além disso, o caminho de upload das
+  evidências apontava para zig-out/test-fault/, diretório que deixou de existir
+  quando o teste de falha passou a cobrir dois modos de injeção.
+  CORREÇÃO: build.zig entrou na lista e passou por "zig fmt"; os caminhos de
+  upload foram corrigidos. A correção de formatação em build.zig foi de UMA
+  LINHA (espaçamento), nada mais.
+
+TESTE DE FALHA AMPLIADO — AS DUAS FORMAS DO QUADRO
+  O teste de falha agora injeta duas falhas, uma para cada forma do quadro:
+    invalid_opcode  #UD (vetor 6), sem código de erro
+    bad_segment     #GP (vetor 13), código de erro = o seletor 0xa0
+  A segunda carrega o seletor 0xa0 em ES; o índice está muito além do limite
+  da GDT do próprio kernel, então o processador levanta #GP e reporta o seletor
+  como código de erro. O teste exige também que o seletor de código reportado
+  seja 0x8, o do kernel: um quadro lido no deslocamento errado mostra ali um
+  endereço, e foi assim que o erro de leitura foi detectado.
+  A opção de build mudou de "-Dfault-inject=true" (booleano) para
+  "-Dfault-mode=none|invalid_opcode|bad_segment" (string), porque os dois
+  modos são necessários para cobrir a decodificação.
+
+VALIDAÇÃO REAL EXECUTADA NESTA SESSÃO (todos os comandos abaixo rodaram):
+  zig fmt --check build.zig boot kernel shared tools   -> PASS (mesma lista do CI)
+  zig build                                            -> OK, 2 artefatos.
+  zig build unit-test                                   -> PASS (agora inclui os 6
+                                                       testes do modelo de exceção).
+  zig test kernel/arch/x86_64/exception.zig             -> 6 testes, todos PASS.
+  zig build boot-test                                   -> PASS (exit 0).
+  zig build fault-test                                  -> PASS (exit 0), os dois modos.
+  zig build test                                        -> PASS.
+
+PROVA A/B (mesma máquina, mesmo build, só o código do idt.zig trocado):
+  ORIGINAIS + ReleaseSmall -> "vector 6 (invalid opcode)", rip=0x10109e cs=0x8
+  ORIGINAIS + ReleaseSafe  -> "vector 13 (general protection fault)",
+                              rip=0x0 cs=0x10516b  (o handler falhou com ele
+                              mesmo e o quadro foi lido deslocado)
+  CORRIGIDO + ReleaseSafe  -> "vector 6 (invalid opcode)", rip=0x1053c1 cs=0x8
+  ORIGINAIS + injeção #GP -> "vector 13", rip=0xa0 cs=0x101640  (o código de
+                              erro reportado como RIP; o RIP reportado como CS)
+  CORRIGIDO + injeção #GP -> "vector 13", rip=0x101973 cs=0x8, error_code=0xa0
+  Com os originais, o teste de falha FALHA (2 verificações). Com a correção,
+  PASSA. O teste é capaz de falhar.
+
+ARQUITETURA E LINKER (revisados, sem defeito encontrado):
+  GDT: byte de flags confere os nibbles pelo teste (limite 0xfffff, 4 GiB),
+  seletor 0x08 para código e 0x10 para dados, cópia do seletor do firmware
+  preservada para a transição, troca de CS por lretq com RSP alinhado.
+  IDT: entradas de 16 bytes, tipo 0x8E (gate de interrupção 64 bits, DPL 0),
+  base alinhada em 16 bytes, limite = 256*16-1.
+  Linker: kernel/linker.ld fixa a carga em 0x100000, ENTRY(azura_kernel_entry)
+  e o .text no mesmo endereço; conferido com readelf -lW e readelf -SW.
+  Nenhum defeito encontrado nesses quatro itens.
+
+PENDÊNCIAS / PRÓXIMOS PASSOS:
+  1. Decidir a licença (MIT, Apache-2.0 ou GPL-2.0-or-later). O arquivo LICENSE
+     continua NÃO criado por decisão do AGENTS.md; a tag v0.1.0 depende disso.
+  2. Mergear o PR #1 em main: depende de autorização explícita.
+  3. M2.2 (ExitBootServices) em branch nova, com os critérios de
+     docs/specs/m2.2-exitbootservices.md.
+
+ROLLBACK: esta etapa só alterou arquivos do repositório local. Nenhuma
+configuração externa, nenhuma tag, nenhuma release, nenhum push.
+

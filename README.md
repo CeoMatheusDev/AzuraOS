@@ -18,7 +18,9 @@ compatibility is claimed unless it has been demonstrated.
 | --------- | ----- | -------- |
 | M0 Engineering | done | `docs/STATUS.txt`, `docs/TOOLCHAIN.md`, reproducible build graph |
 | M1 Boot | done | `docs/testing/m1-boot-evidence.md` |
-| M2 Kernel minimum | not started | — |
+| M2.1 Kernel GDT | done, PR #1 open | `docs/adr/ADR-0004-kernel-gdt.md` |
+| CI (GitHub Actions) | **passing** | run 39511186005 |
+| M2.2 `ExitBootServices` | not started | criteria in `docs/specs/m2.2-exitbootservices.md` |
 | M3 Execution | not started | — |
 
 The boot chain implemented today:
@@ -131,6 +133,8 @@ docs/testing/       measured evidence
 * `docs/adr/ADR-0001-architecture-and-abi.md` — the architecture and the ABI.
 * `docs/adr/ADR-0002-boot-protocol.md` — the bootloader/kernel contract.
 * `docs/adr/ADR-0003-kernel-load-address.md` — why the kernel is linked at 1 MiB.
+* `docs/adr/ADR-0004-kernel-gdt.md` — the kernel's own GDT, and the descriptor
+  layout that must not be got wrong.
 * `docs/specs/boot-protocol-v1.md` — field by field specification.
 * `docs/testing/m1-boot-evidence.md` — the measured evidence of M1.
 * `docs/STATUS.txt` — the running status log.
