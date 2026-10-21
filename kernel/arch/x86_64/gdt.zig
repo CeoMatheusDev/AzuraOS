@@ -210,6 +210,13 @@ pub fn readTaskRegister() u16 {
     );
 }
 
+/// Return the exclusive bounds of the dedicated double-fault IST1 stack.
+/// Used by the fault handler to confirm that its frame is on IST1.
+pub fn doubleFaultStackBounds() struct { base: u64, top: u64 } {
+    const base = @intFromPtr(&df_stack);
+    return .{ .base = base, .top = base + df_stack.len };
+}
+
 /// Read the GDTR back, to prove which GDT the processor is using.
 ///
 /// The values are extracted inside the assembly block, for the same reason
