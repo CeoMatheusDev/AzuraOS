@@ -249,4 +249,19 @@ test "exception frame must fit completely within IST stack" {
     try testing.expect(!frameFitsStack(base, top, base, 48));
     try testing.expect(!frameFitsStack(base, base, top, 0));
     try testing.expect(!frameFitsStack(0xffff_ffff_ffff_fff0, base, top, 48));
+
+    // A frame exactly filling the stack is valid; one byte larger is not.
+    try testing.expect(frameFitsStack(base, base, top, top - base));
+    try testing.expect(!frameFitsStack(base, base, top, top - base + 1));
+
+    // Degenerate and reversed ranges must be rejected, even for a small frame.
+    try testing.expect(!frameFitsStack(base, base, base, 1));
+    try testing.expect(!frameFitsStack(base, top, base, 1));
+
+    // High-half canonical kernel addresses must not overflow the bounds check.
+    const high_base: u64 = 0xffff_ffff_ffff_c000;
+    const high_top: u64 = 0xffff_ffff_ffff_f000;
+    try testing.expect(frameFitsStack(high_top - 48, high_base, high_top, 48));
+    try testing.expect(!frameFitsStack(high_top - 47, high_base, high_top, 48));
+    try testing.expect(!frameFitsStack(0xffff_ffff_ffff_fff0, high_base, high_top, 48));
 }
