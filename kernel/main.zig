@@ -29,6 +29,16 @@ const gdt = @import("arch/x86_64/gdt.zig");
 const idt = @import("arch/x86_64/idt.zig");
 const tss = @import("arch/x86_64/tss.zig");
 const frames = @import("mm/frames.zig");
+const paging = @import("arch/x86_64/paging.zig");
+
+extern var __text_start: u8;
+extern var __text_end: u8;
+extern var __rodata_start: u8;
+extern var __rodata_end: u8;
+extern var __data_start: u8;
+extern var __data_end: u8;
+extern var __bss_start: u8;
+extern var __bss_end: u8;
 
 /// Number of memory map entries printed in the boot log.
 const memory_map_preview = 8;
@@ -175,6 +185,12 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     // The map and the exception environment are trusted now. Build the
     // allocator and prove that it can hand out and take back real frames.
     initFrames(boot_info);
+
+    // Replace the firmware's page tables with our own. The identity map
+    // keeps every virtual address the kernel is currently using valid, so
+    // the switch is transparent; the old tables are released afterwards.
+    initPaging(boot_info);
+
     com1.write("[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok frames=ok framebuffer=ok memory_map=ok\n");
 
     if (build_options.fault_mode.len != 0 and !std.mem.eql(u8, build_options.fault_mode, "none")) {
@@ -195,12 +211,16 @@ const FaultMode = enum {
     /// #DF (vector 8), forced by hiding the #GP gate from the IDT. The
     /// vector uses IST1, so the handler must run on the alternate stack.
     double_fault,
+    /// #PF (vector 14). Reads an address that is not mapped, so the
+    /// handler reports the faulting address in CR2.
+    page_fault,
 
     /// Parse the value of the `fault-mode` build option.
     fn parse(text: []const u8) ?FaultMode {
         if (std.mem.eql(u8, text, "invalid_opcode")) return .invalid_opcode;
         if (std.mem.eql(u8, text, "bad_segment")) return .bad_segment;
         if (std.mem.eql(u8, text, "double_fault")) return .double_fault;
+        if (std.mem.eql(u8, text, "page_fault")) return .page_fault;
         return null;
     }
 };
@@ -237,6 +257,11 @@ fn injectFault(mode_text: []const u8) noreturn {
             descriptor.limit = 9 * @sizeOf(idt.Entry) - 1;
             cpu.loadIdt(&descriptor);
             asm volatile ("int $13");
+        },
+        .page_fault => {
+            com1.write("[azura] fault injection requested, reading an unmapped page\n");
+            const probe: *volatile u64 = @ptrFromInt(0xdead0000);
+            _ = probe.*;
         },
     }
 
@@ -852,4 +877,186 @@ fn overlapsOwnedRange(address: u64, boot_info: *shared.boot_info) bool {
 
 fn rangeOverlaps(a_start: u64, a_end: u64, b_start: u64, b_end: u64) bool {
     return a_start < b_end and b_start < a_end;
+}
+
+/// Build and install the kernel's own 4-level page tables.
+///
+/// The tables identity-map every region the kernel or the firmware may touch
+/// (conventional, loader, boot services, runtime services, ACPI, persistent
+/// and PAL memory, plus the framebuffer MMIO) and then overwrite the kernel
+/// image pages with W^X permissions. The switch is made with interrupts
+/// disabled and the old tables are released only after the new CR3 is active.
+fn initPaging(boot_info: *shared.boot_info) void {
+    const efer_before = cpu.readEfer();
+    cpu.enableNx();
+    const efer_after = cpu.readEfer();
+    com1.print("[azura] paging: EFER before=0x{x} after=0x{x}\n", .{ efer_before, efer_after });
+
+    const old_cr3 = cpu.readCr3();
+    com1.print("[azura] paging: building tables, old CR3=0x{x}\n", .{old_cr3});
+
+    const pml4 = paging.allocTable(&frame_allocator) orelse {
+        com1.write("[azura] FATAL: could not allocate the PML4\n");
+        cpu.haltForever();
+    };
+
+    const data_flags = paging.Flags{
+        .present = true,
+        .writable = true,
+        .no_execute = true,
+    };
+
+    var index: u32 = 0;
+    while (index < boot_info.memory_map_count) : (index += 1) {
+        const descriptor = descriptorAt(boot_info, index);
+        if (descriptor.number_of_pages == 0) continue;
+
+        const map_type = descriptor.type;
+        if (map_type == @backingInt(shared.memory_type.unusable)) continue;
+
+        const start = descriptor.physical_start;
+        const size = descriptor.number_of_pages * page_size;
+
+        if (map_type == @backingInt(shared.memory_type.memory_mapped_io) or
+            map_type == @backingInt(shared.memory_type.memory_mapped_io_port_space))
+        {
+            if (boot_info.framebuffer_present != 0 and start == boot_info.framebuffer.base) {
+                const framebuffer = boot_info.framebuffer;
+                if (!paging.mapRange(pml4, framebuffer.base, framebuffer.base, framebuffer.size, data_flags, &frame_allocator)) {
+                    com1.write("[azura] FATAL: could not map the framebuffer\n");
+                    cpu.haltForever();
+                }
+            }
+            continue;
+        }
+
+        if (!paging.mapRange(pml4, start, start, size, data_flags, &frame_allocator)) {
+            com1.print("[azura] FATAL: could not map memory map entry {d}\n", .{index});
+            cpu.haltForever();
+        }
+    }
+    com1.write("[azura] paging: descriptors mapped\n");
+
+    // W^X for the kernel image. The identity map above made every page
+    // writable; overwrite the sections that must not be.
+    const text_start = @intFromPtr(&__text_start);
+    const text_end = @intFromPtr(&__text_end);
+    const rodata_start = @intFromPtr(&__rodata_start);
+    const rodata_end = @intFromPtr(&__rodata_end);
+    const data_start = @intFromPtr(&__data_start);
+    const data_end = @intFromPtr(&__data_end);
+    const bss_start = @intFromPtr(&__bss_start);
+    const bss_end = @intFromPtr(&__bss_end);
+
+    if (text_end > text_start) {
+        if (!paging.mapRange(pml4, text_start, text_start, text_end - text_start, .{
+            .present = true,
+            .writable = false,
+            .no_execute = false,
+        }, &frame_allocator)) {
+            com1.write("[azura] FATAL: could not map the kernel text\n");
+            cpu.haltForever();
+        }
+    }
+    if (rodata_end > rodata_start) {
+        if (!paging.mapRange(pml4, rodata_start, rodata_start, rodata_end - rodata_start, .{
+            .present = true,
+            .writable = false,
+            .no_execute = true,
+        }, &frame_allocator)) {
+            com1.write("[azura] FATAL: could not map the kernel rodata\n");
+            cpu.haltForever();
+        }
+    }
+    if (data_end > data_start) {
+        if (!paging.mapRange(pml4, data_start, data_start, data_end - data_start, data_flags, &frame_allocator)) {
+            com1.write("[azura] FATAL: could not map the kernel data\n");
+            cpu.haltForever();
+        }
+    }
+    if (bss_end > bss_start) {
+        if (!paging.mapRange(pml4, bss_start, bss_start, bss_end - bss_start, data_flags, &frame_allocator)) {
+            com1.write("[azura] FATAL: could not map the kernel bss\n");
+            cpu.haltForever();
+        }
+    }
+    com1.write("[azura] paging: W^X applied, switching CR3\n");
+
+    cpu.writeCr3(@intFromPtr(pml4));
+    com1.write("[azura] paging: CR3 written\n");
+
+    // Release the firmware's tables. They are distinct from the ones just
+    // built, so this cannot free a page the new tree needs.
+    freeOldPageTables(old_cr3);
+
+    // The kernel now owns its page tables, so the boot services quarantine
+    // from ADR-0007 can be released. The descriptors are identity mapped
+    // above and the frames are returned to the pool.
+    const free_before_bs = frame_allocator.stats().free;
+    var bs_index: u32 = 0;
+    while (bs_index < boot_info.memory_map_count) : (bs_index += 1) {
+        const descriptor = descriptorAt(boot_info, bs_index);
+        if (descriptor.type != @backingInt(shared.memory_type.boot_services_code) and
+            descriptor.type != @backingInt(shared.memory_type.boot_services_data))
+        {
+            continue;
+        }
+        if (descriptor.number_of_pages == 0) continue;
+        const end = descriptor.physical_start + descriptor.number_of_pages * page_size;
+        frame_allocator.markFreeRange(descriptor.physical_start, end);
+    }
+    com1.print("[azura] paging: released boot services quarantine, free frames {d} -> {d}\n", .{
+        free_before_bs,
+        frame_allocator.stats().free,
+    });
+
+    if (cpu.readCr3() != @intFromPtr(pml4)) {
+        com1.write("[azura] FATAL: CR3 did not accept the new page tables\n");
+        cpu.haltForever();
+    }
+
+    com1.print("[azura] paging: new page tables at 0x{x}, CR3=0x{x}\n", .{
+        @intFromPtr(pml4),
+        cpu.readCr3(),
+    });
+    com1.print("[azura] paging: text=0x{x}..0x{x} rodata=0x{x}..0x{x} data=0x{x}..0x{x} bss=0x{x}..0x{x}\n", .{
+        text_start,
+        text_end,
+        rodata_start,
+        rodata_end,
+        data_start,
+        data_end,
+        bss_start,
+        bss_end,
+    });
+}
+
+/// Walk the firmware's page table tree and return its frames to the pool.
+fn freeOldPageTables(old_cr3: u64) void {
+    const old_pml4: *const paging.Table = @ptrFromInt(old_cr3 & paging.address_mask);
+    var idx4: usize = 0;
+    while (idx4 < paging.entries_per_table) : (idx4 += 1) {
+        const p4e = old_pml4[idx4];
+        if (p4e & 1 == 0) continue;
+        if (p4e & (1 << 7) != 0) continue;
+        const pdpt: *const paging.Table = @ptrFromInt(p4e & paging.address_mask);
+        var idx3: usize = 0;
+        while (idx3 < paging.entries_per_table) : (idx3 += 1) {
+            const pdpe = pdpt[idx3];
+            if (pdpe & 1 == 0) continue;
+            if (pdpe & (1 << 7) != 0) continue;
+            const pd: *const paging.Table = @ptrFromInt(pdpe & paging.address_mask);
+            var idx2: usize = 0;
+            while (idx2 < paging.entries_per_table) : (idx2 += 1) {
+                const pde = pd[idx2];
+                if (pde & 1 == 0) continue;
+                if (pde & (1 << 7) != 0) continue;
+                const pt: *const paging.Table = @ptrFromInt(pde & paging.address_mask);
+                frame_allocator.release(@intFromPtr(pt)) catch {};
+            }
+            frame_allocator.release(@intFromPtr(pd)) catch {};
+        }
+        frame_allocator.release(@intFromPtr(pdpt)) catch {};
+    }
+    frame_allocator.release(old_cr3 & paging.address_mask) catch {};
 }
