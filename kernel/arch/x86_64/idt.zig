@@ -243,7 +243,7 @@ const stub_vector_opcode = [_]u8{ 0x48, 0xc7, 0xc7 };
 ///   `fc`            `cld`
 const stub_fixup = [_]u8{ 0x48, 0x89, 0xe6, 0x48, 0x83, 0xe4, 0xf0, 0xfc };
 
-/// Verify that every entry points at the beginning in its stub.
+/// Verify that every installed IDT entry points at the beginning of its stub.
 ///
 /// Reading the bytes the stub must start with, at the address the IDT
 /// names, proves that the entry points at the start of the stub and not
@@ -262,6 +262,13 @@ const stub_fixup = [_]u8{ 0x48, 0x89, 0xe6, 0x48, 0x83, 0xe4, 0xf0, 0xfc };
 pub fn verifyEntries() ?u8 {
     inline for (0..exception_vector_count) |vector| {
         const address = makeStub(vector);
+        const entry = table[vector];
+        // Verify the address actually installed in the IDT, not just the
+        // contents at the expected stub address.
+        const installed_address: u64 = @as(u64, entry.offset_low) |
+            (@as(u64, entry.offset_middle) << 16) |
+            (@as(u64, entry.offset_high) << 32);
+        if (installed_address != @as(u64, @intCast(address))) return @intCast(vector);
         const bytes: [*]const u8 = @ptrFromInt(address);
 
         for (stub_vector_opcode, 0..) |expected, index| {
