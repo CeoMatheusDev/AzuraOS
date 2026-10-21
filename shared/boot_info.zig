@@ -2,7 +2,7 @@
 //!
 //! This file is compiled into BOTH the bootloader (boot/uefi) and the kernel
 //! (kernel/). It is the single normative definition of the handover contract;
-//! see docs/specs/boot-protocol-v1.md and docs/adr/ADR-0002-boot-protocol.md.
+//! see docs/specs/boot-protocol-v2.md and docs/adr/ADR-0002-boot-protocol.md.
 //!
 //! Rules for this file:
 //!   * `extern struct` layouts only — no Zig-specific runtime representation.
@@ -14,12 +14,19 @@
 
 const std = @import("std");
 
-/// "AZURAS1" in big-endian byte order. Rejects a kernel built against a
+/// "AZURAS2" in big-endian byte order. Rejects a kernel built against a
 /// different contract instead of interpreting garbage.
-pub const magic: u64 = 0x415a5552414f5331;
+///
+/// History: "AZURAS1" (0x415a5552414f5331) was the M1 protocol, size 136.
+pub const magic: u64 = 0x415a5552414f5332;
 
 /// Current boot protocol revision.
-pub const version: u32 = 1;
+///
+///   1  M1: memory map, framebuffer, kernel range and stack. The bootloader
+///      does not call ExitBootServices.
+///   2  M2.2: the bootloader calls ExitBootServices before the jump and
+///      reports the stack base, the map key and whether the call succeeded.
+pub const version: u32 = 2;
 
 /// The UEFI memory types, flattened to plain integers so the kernel does not
 /// need to depend on the UEFI headers. Values follow the UEFI 2.10
@@ -142,12 +149,31 @@ pub const boot_info = extern struct {
     firmware_vendor: u64,
     firmware_revision: u32,
     _reserved1: u32,
+
+    // --- Protocol 2 -----------------------------------------------------
+    // Appended after the protocol 1 fields on purpose: the offsets of the
+    // fields above do not move, so a v1 structure can still be read by hand
+    // while debugging.
+
+    /// Base of the initial kernel stack (inclusive). The usable stack is
+    /// `[stack_base, stack_top)`.
+    stack_base: u64,
+
+    /// Key of the memory map the successful ExitBootServices call used.
+    /// 0 when the bootloader did not call it.
+    memory_map_key: u64,
+
+    /// 1 when the bootloader called ExitBootServices successfully, so no
+    /// UEFI boot service exists after the handover. The kernel refuses to
+    /// start when this is 0.
+    boot_services_exited: u32,
+    _reserved2: u32,
 };
 
 comptime {
     // The layout must be stable; a silent change here breaks the contract
     // between two independently built artifacts.
-    if (@sizeOf(boot_info) != 136) @compileError("boot_info layout changed");
+    if (@sizeOf(boot_info) != 160) @compileError("boot_info layout changed");
     if (@sizeOf(memory_descriptor) != 40) @compileError("memory_descriptor layout changed");
     if (@sizeOf(framebuffer) != 48) @compileError("framebuffer layout changed");
 }

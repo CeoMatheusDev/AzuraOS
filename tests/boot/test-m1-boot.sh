@@ -62,13 +62,16 @@ expected=(
   "[azura] memory map:"
   "[azura] kernel loaded: entry="
   "[azura] kernel stack:"
+  "[azura] final memory map:"
+  "[azura] ExitBootServices: success"
   "[azura] jumping to the kernel entry point"
   "[azura] === AzuraOS kernel"
-  "[azura] boot protocol: version 1"
+  "[azura] boot protocol: version 2"
   "[azura] memory map:"
   "[azura] framebuffer:"
   "[azura] GDT active, the segments are the kernel's own"
   "[azura] IDT installed, exception handling active"
+  "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok framebuffer=ok memory_map=ok"
   "[azura] boot complete, halting"
 )
 
@@ -119,6 +122,21 @@ elif [[ "$bootloader_sum" != "$kernel_sum" ]]; then
   echo "FAIL: the framebuffer checksums differ" >&2
   echo "      bootloader: $bootloader_sum" >&2
   echo "      kernel:     $kernel_sum" >&2
+  failures=$((failures + 1))
+fi
+
+# The key the kernel received must be the one the successful ExitBootServices
+# call used. A mismatch means the boot_info and the call disagree, and the
+# kernel would be trusting a map nobody promised.
+bootloader_key=$(grep -m1 -F "[azura] boot services exited, map key=" "$serial_log" | awk '{print $NF}' || true)
+kernel_key=$(grep -m1 -F "[azura] boot services: exited, memory map key=" "$serial_log" | awk '{print $NF}' || true)
+if [[ -z "$bootloader_key" || -z "$kernel_key" ]]; then
+  echo "FAIL: the memory map key is missing from the log" >&2
+  failures=$((failures + 1))
+elif [[ "$bootloader_key" != "$kernel_key" ]]; then
+  echo "FAIL: the memory map keys differ" >&2
+  echo "      bootloader: $bootloader_key" >&2
+  echo "      kernel:     $kernel_key" >&2
   failures=$((failures + 1))
 fi
 

@@ -40,9 +40,41 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
 - `LICENSE` and `NOTICE`: the Apache License 2.0, adopted in
   `docs/adr/ADR-0006-apache-2-0-license.md`. `LICENSE` holds the canonical
   text published by the ASF, unmodified.
+- `boot/uefi/main.zig`: the `ExitBootServices` handover. The map buffer is
+  sized from the size the firmware reports, every value the firmware writes
+  is validated, the key of the last snapshot is used, a stale key is
+  refreshed on `EFI_INVALID_PARAMETER` (at most four attempts) and the jump
+  happens only after a success.
+- `shared/boot_info.zig`: boot protocol version 2 — `stack_base`,
+  `memory_map_key` and `boot_services_exited`, appended after the version 1
+  fields; magic `"AZURAS2"`, size 160 bytes.
+- `kernel/main.zig`: the post-transition checks — a write/read probe inside
+  the reported stack range, the GDT and IDT read backs, the framebuffer
+  checksum, full memory map validation (including the descriptor that covers
+  the map buffer itself) and the inherited CR3 in the log.
+- `kernel/arch/x86_64/cpu.zig`: `readCr3`, so the kernel reports the page
+  tables it is actually using instead of assuming them.
+- `tests/boot/test-m2.2-ebs-retry.sh` and the `-Dstale-map-key=true` build
+  option: the bootloader allocates between the final snapshot and the call,
+  which forces a stale key, and the test asserts that the firmware rejects
+  it and that the retry uses a new key.
+- `docs/adr/ADR-0007-memory-ownership-after-exitbootservices.md`: which
+  physical memory the kernel may touch after the transition, including the
+  boot services quarantine and the kernel image range.
+- `docs/testing/m2.2-exitbootservices-evidence.md`: the measured evidence
+  of the normal boot, the stale key retry and the fault path.
 
 ### Changed
 
+- The boot protocol is version 2. The version 1 field offsets do not move;
+  the new fields are appended. `docs/specs/boot-protocol-v1.md` became
+  `docs/specs/boot-protocol-v2.md`.
+- The bootloader no longer builds `boot_info` on its own stack: the
+  structure is allocated from the firmware pool, like the stack and the map,
+  so it does not depend on firmware stack memory after the transition.
+- The final memory map is taken after the splash and the console line, and
+  no firmware service is called after `ExitBootServices`: the console is a
+  boot service, the splash is not.
 - The kernel no longer runs on the GDT built by the firmware. The IDT is
   installed first with the selector that is active at that moment, so a
   fault during the switch is reported instead of rebooting the machine, and
@@ -84,6 +116,12 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
   lives in `kernel/arch/x86_64/exception.zig`, which is.
 - The CI uploaded the fault test evidence from a directory that no longer
   existed, so the serial logs of the fault test were not archived.
+- The memory map buffer was a fixed 32 KiB that doubled on
+  `EFI_BUFFER_TOO_SMALL`; it is now sized from the size the firmware reports,
+  and `descriptor_size` is validated before it is used as a stride.
+- A firmware that reported `descriptor_size == 0` would have trapped inside
+  the std `getMemoryMapInfo` wrapper, which divides by it; the bootloader
+  now calls the raw service and checks the value first.
 
 ## [0.1.0] — 2026-10-20
 
@@ -129,7 +167,7 @@ and the kernel reports the machine it found before halting.
 - `tests/boot/test-m1-boot.sh` and `tests/boot/test-m1-fault-handler.sh`:
   the automated QEMU tests, both bounded by a timeout and with a verifiable
   exit status.
-- `docs/adr/ADR-0001`, `ADR-0002`, `ADR-0003`, `docs/specs/boot-protocol-v1.md`
+- `docs/adr/ADR-0001`, `ADR-0002`, `ADR-0003`, `docs/specs/boot-protocol-v2.md`
   and `docs/testing/m1-boot-evidence.md`.
 - `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`.
 

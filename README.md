@@ -7,10 +7,11 @@ management, scheduler, IPC, drivers, userland, libraries and a desktop
 environment. Nothing is inherited from an existing kernel, and no
 compatibility is claimed unless it has been demonstrated.
 
-> **Status: M1 (boot) reached.** The UEFI bootloader and the kernel boot in
-> QEMU/OVMF on x86_64, write a verifiable serial log, paint the firmware
-> framebuffer and stop in a controlled way. There is no userland, no
-> filesystem and no graphical desktop yet.
+> **Status: M2.2 (`ExitBootServices`) implemented on its branch.** The
+> bootloader now hands the machine over with the boot services gone, and the
+> kernel proves that the stack, the GDT, the IDT, the framebuffer and the
+> memory map survived. PR #2 is open with a green CI; the merge into `main`
+> is pending.
 
 ## Current state
 
@@ -20,7 +21,7 @@ compatibility is claimed unless it has been demonstrated.
 | M1 Boot | done | `docs/testing/m1-boot-evidence.md` |
 | M2.1 Kernel GDT | done, merged in `1e87504` (PR #1) | `docs/adr/ADR-0004-kernel-gdt.md` |
 | CI (GitHub Actions) | **passing** | run 39537277273 (main, `1e87504`) |
-| M2.2 `ExitBootServices` | not started | criteria in `docs/specs/m2.2-exitbootservices.md` |
+| M2.2 `ExitBootServices` | done, PR #2 open with green CI; merge pending | `docs/testing/m2.2-exitbootservices-evidence.md` |
 | M3 Execution | not started | — |
 
 The boot chain implemented today:
@@ -31,9 +32,11 @@ OVMF (UEFI firmware)
        ├─ reads azura-kernel.elf from the EFI System Partition
        ├─ validates the ELF64 image and the firmware memory map
        ├─ copies the PT_LOAD segments to 0x100000
+       ├─ takes the final memory map and calls ExitBootServices with its key
        └─ jumps to azura_kernel_entry with RDI = &boot_info
             └─ azura-kernel.elf  (ELF64, x86_64-freestanding)
-                 ├─ validates the boot protocol
+                 ├─ validates the boot protocol (including the transition)
+                 ├─ proves stack, GDT, IDT, framebuffer and map survived
                  ├─ installs the IDT (CPU exceptions are reported, not fatal)
                  └─ halts
 ```
@@ -75,35 +78,55 @@ zig build boot
 ## Tests
 
 ```sh
-zig build unit-test    # host unit tests (ELF parser, IDT helpers)
-zig build boot-test    # boots the image in QEMU and checks the boot sequence
-zig build fault-test   # boots a fault injection kernel and checks the handler
-zig build test         # all of the above
+zig build unit-test       # host unit tests (ELF parser, IDT helpers)
+zig build boot-test       # boots the image in QEMU and checks the boot sequence
+zig build fault-test      # boots a fault injection kernel and checks the handler
+zig build ebs-retry-test  # boots with a stale memory map key and checks the retry
+zig build test            # all of the above
 ```
 
 Every QEMU test is bounded by a timeout and exits with a verifiable status:
 `0` pass, `1` fail, `2` cannot run (missing tool or missing image).
 
-The expected boot log, produced by the current artifacts, is:
+The expected boot log, produced by the current artifacts, is (trimmed: the
+memory map preview and a few setup lines are omitted):
 
 ```
-[azura] === AzuraOS UEFI bootloader v0.1.0 (M1) ===
+[azura] === AzuraOS UEFI bootloader v0.1.0 (M2.2) ===
 [azura] firmware vendor: EDK II
 [azura] framebuffer: 1280x800 stride=1280 bytes=4096000
-[azura] kernel image: 17216 bytes
+[azura] kernel image: 25872 bytes
 [azura] memory map: 85 entries
-[azura] kernel loaded: entry=0x100000 range=0x100000..0x104240 segments=3
-[azura] kernel stack: 16384 bytes, top=0x1dff5018
-[azura] final memory map: 86 entries
+[azura] kernel loaded: entry=0x100000 range=0x100000..0x106400 segments=3
+[azura] kernel stack: 16384 bytes, base=0x1e00d018 top=0x1e011018
+[azura] boot information: 160 bytes at 0x1e6ab018
+[azura] framebuffer checksum: 0xd43a1e5ec0808a0d
+[azura] final memory map: 85 entries, key=0x731
+[azura] ExitBootServices: attempt 1, key=0x731, entries=85
+[azura] ExitBootServices: success
+[azura] boot services exited, map key=0x731
 [azura] jumping to the kernel entry point
-[azura] === AzuraOS kernel v0.1.0 (M1) ===
-[azura] boot protocol: version 1, 136 bytes
-[azura] conventional memory: 463 MiB
+[azura] === AzuraOS kernel v0.1.0 (M2.2) ===
+[azura] boot protocol: version 2, 160 bytes
+[azura] boot services: exited, memory map key=0x731
+[azura] page tables: the firmware's (CR3=0x1f401000), the kernel's own are M2.4
+[azura] kernel image: 0x100000..0x106400
+[azura] stack: base=0x1e00d018 top=0x1e011018
+[azura] memory map: 85 entries
+[azura] memory: conventional=464 MiB boot_services=42 MiB loader=144 KiB
+[azura] memory map buffer: 0x1e6a9018 (loader_data)
 [azura] framebuffer: 1280x800 stride=1280 base=0x80000000 size=4096000
 [azura] framebuffer checksum: 0xd43a1e5ec0808a0d
 [azura] IDT installed, exception handling active
+[azura] stack: writable at 0x1e010d60, inside 0x1e00d018..0x1e011018
+[azura] IDT: base=0x1053d0 limit=4095
+[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok framebuffer=ok memory_map=ok
 [azura] boot complete, halting
 ```
+
+The boot test also asserts that the memory map key the kernel receives is the
+one the successful `ExitBootServices` call used, and the retry test forces a
+stale key to check that the bootloader refreshes it instead of giving up.
 
 The framebuffer checksum is computed by the bootloader over the pixels it
 painted and recomputed by the kernel after the handover. The boot test
@@ -139,8 +162,12 @@ docs/testing/       measured evidence
   ABI fixup in the stub, and the two defects the review of PR #1 found.
 * `docs/adr/ADR-0006-apache-2-0-license.md` — the license decision, the
   rejected alternatives and the dependency policy.
-* `docs/specs/boot-protocol-v1.md` — field by field specification.
+* `docs/adr/ADR-0007-memory-ownership-after-exitbootservices.md` — which
+  physical memory the kernel may touch after the transition, and when.
+* `docs/specs/boot-protocol-v2.md` — field by field specification.
 * `docs/testing/m1-boot-evidence.md` — the measured evidence of M1.
+* `docs/testing/m2.2-exitbootservices-evidence.md` — the measured evidence
+  of the transition, the stale key retry and the fault path after it.
 * `docs/STATUS.txt` — the running status log.
 * `docs/TOOLCHAIN.md` — the toolchain policy.
 * `docs/BUILD_CONTRACT.md` — the build invariants.
@@ -155,8 +182,11 @@ docs/testing/       measured evidence
   buffer capture.
 * There is no graphical desktop, no userland, no filesystem and no driver
   yet. The roadmap lives in `docs/roadmap/milestones.md`.
-* The kernel still runs on the firmware's GDT and page tables and does not
-  call `ExitBootServices`. Owning the machine is M2.
+* The kernel still runs on the firmware's page tables; it does not install
+  its own until M2.4. The boot log prints the CR3 it inherited on every boot.
+* The memory map is the pre-`ExitBootServices` snapshot. The boot services
+  regions are free in hardware terms but are not allocated until M2.3; see
+  ADR-0007.
 
 ## License
 

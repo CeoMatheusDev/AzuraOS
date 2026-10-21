@@ -1,9 +1,9 @@
 # ADR-0002 — Boot protocol between the UEFI bootloader and the kernel
 
 - Status: accepted
-- Date: 2026-10-20
-- Milestone: M1
-- Related: ADR-0001, ADR-0003, `docs/specs/boot-protocol-v1.md`
+- Date: 2026-10-20 (revision 2: 2026-10-21)
+- Milestone: M1 (revision 2: M2.2)
+- Related: ADR-0001, ADR-0003, ADR-0007, `docs/specs/boot-protocol-v2.md`
 
 ## Context
 
@@ -23,7 +23,8 @@ explicit and testable.
 
 ### 1. Control transfer
 
-The bootloader loads the kernel segments at their link address and then:
+The bootloader loads the kernel segments at their link address and then
+(revision 2 inserts `ExitBootServices` before this sequence; see §6):
 
 * disables interrupts (`cli`),
 * loads the stack pointer with the top of a 16 KiB stack it allocated,
@@ -45,11 +46,12 @@ the result does not depend on the register allocator.
 * `magic` and `version`, checked by both sides,
 * `size`, the size of the structure the producer filled in,
 * the kernel entry point and the physical range the kernel image occupies,
-* the initial stack pointer,
+* the initial stack base and top,
 * a pointer to the firmware memory map, its entry count and the firmware's
   descriptor size,
 * the framebuffer geometry and pixel masks,
-* the firmware vendor string and revision.
+* the firmware vendor string and revision,
+* the memory map key and whether `ExitBootServices` succeeded (revision 2).
 
 All address fields are plain integers; `0` means "absent". There are no
 pointers to Zig objects, no slices and no optionals.
@@ -58,9 +60,9 @@ pointers to Zig objects, no slices and no optionals.
 assertion, described in a specification, and implemented in another
 language later without a C header generator.
 
-*Consequence.* The structure is 136 bytes. The compile time assertions in
-`shared/boot_info.zig` fail the build if the layout ever changes by
-accident.
+*Consequence.* The structure is 160 bytes in revision 2 (136 in revision 1).
+The compile time assertions in `shared/boot_info.zig` fail the build if the
+layout ever changes by accident.
 
 ### 3. The memory map
 
@@ -93,9 +95,36 @@ automated test.
 
 ### 5. Versioning
 
-The magic is `"AZURAS1"` and the version is `1`. Any incompatible change to
+The magic is `"AZURAS2"` and the version is `2`. Any incompatible change to
 the structure, the call convention or the semantics of a field requires a new
 magic and a new version.
+
+### 6. Revision 2 — `ExitBootServices` (M2.2)
+
+Revision 2 adds the transition itself to the contract:
+
+* The bootloader calls `ExitBootServices` after its last allocation, with the
+  key of the final memory map snapshot.
+* On `EFI_INVALID_PARAMETER` (the map changed after the snapshot) it takes a
+  new snapshot, updates `boot_info` and retries, at most four times.
+* After a success it sets `boot_services_exited = 1`, stores the key in
+  `memory_map_key`, calls no boot service again and jumps to the kernel.
+* If the call cannot succeed, the bootloader does not hand over: it logs
+  `FATAL` and halts.
+* The kernel refuses to start when `boot_services_exited != 1`.
+* `stack_base` is added because the base of the stack was previously
+  implicit, and the acquisition checks need both ends of the range.
+
+*Rationale.* The operation has a defined order and a precondition (the key
+must match the current map), and both sides must agree on whether the
+transition happened. Deriving "the boot services are gone" from "we jumped"
+would be an assumption, not evidence.
+
+*Consequence.* The memory map in `boot_info` is the snapshot taken **before**
+the call. The boot services regions it describes are free after the
+transition, but the kernel does not allocate them until M2.3; see ADR-0007.
+The kernel still runs on the firmware page tables, which it reads back and
+logs.
 
 ## Consequences
 
@@ -110,6 +139,6 @@ magic and a new version.
 ## References
 
 * `shared/boot_info.zig` — the normative definition.
-* `docs/specs/boot-protocol-v1.md` — the field by field specification.
-* UEFI Specification 2.10, section 2.3.4 (memory map) and 3.4 (boot
-  services).
+* `docs/specs/boot-protocol-v2.md` — the field by field specification.
+* UEFI Specification 2.10, the memory map description and the Boot Services
+  chapter.
