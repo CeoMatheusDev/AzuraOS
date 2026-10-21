@@ -83,6 +83,24 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
 - `docs/adr/ADR-0008-tss-and-ist.md`, `docs/specs/m2.2b-tss-ist.md` and
   `docs/testing/m2.2b-tss-ist-evidence.md`: the decision, the acceptance
   criteria and the measured evidence of the alternate stack.
+- `kernel/mm/frames.zig`: a 4 KiB frame bitmap allocator with a rotating
+  first-fit hint, inward-aligned free ranges, outward-aligned reservations,
+  explicit errors for double frees and invalid addresses, and host tests
+  including an exhaust/release/reuse stress run over 16,384 frames.
+- `kernel/main.zig`: `initFrames`, which builds the bitmap from the pre-
+  `ExitBootServices` map, frees only conventional memory, reserves the low
+  1 MiB, the kernel image, the boot stack, `boot_info`, the map buffer and
+  the framebuffer, keeps the boot services quarantined and logs the totals.
+- `kernel/main.zig`: `frameSelfTest`, which allocates three frames, writes
+  both ends of each, releases them and requires the lowest frame back before
+  the boot continues.
+- `tests/boot/test-m1-boot.sh`, `test-m1-fault-handler.sh`,
+  `test-m2.2-ebs-retry.sh` and `test-m2.2b-double-fault.sh`: the allocator
+  markers and the `frames=ok` summary are part of the assertions.
+- `docs/adr/ADR-0009-physical-frame-allocator.md`,
+  `docs/specs/m2.3-physical-frames.md` and
+  `docs/testing/m2.3-frames-evidence.md`: the allocator decision, the
+  acceptance criteria and the measured evidence.
 
 ### Changed
 
@@ -126,11 +144,20 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
   installation uses the firmware selector and IST 0 (the kernel TSS is not
   loaded yet), and the final one uses the kernel selector and IST 1 for the
   critical vectors after `LTR 0x18`.
-- The post-`ExitBootServices` summary now includes `tss=ok` and `ist=ok`, and
-  the fault report logs the stack the handler is actually using.
+- The post-`ExitBootServices` summary now includes `tss=ok`, `ist=ok` and
+  `frames=ok`, and the fault report logs the stack the handler is actually
+  using.
 - The boot chain installs the GDT with the TSS descriptor before loading the
   task register, and refuses to boot if the firmware selector would collide
   with the descriptor's two slots.
+- The kernel banner names M2.3 and the kernel image includes the 128 KiB
+  frame bitmap in `.bss`. On the 512 MiB test machine the measured image ends
+  at `0x12d200`; the first free frame is `0x12e000`.
+- Conventional memory is now the only allocatable class. Boot services memory
+  is covered by the bitmap but stays used, because the active firmware page
+  tables live there; M2.4 releases it after installing the kernel's own page
+  tables. This defers, but does not change, the ownership policy in
+  ADR-0007.
 
 ### Fixed
 

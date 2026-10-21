@@ -726,3 +726,88 @@ LIMITAÇÕES / RISCOS
 PRÓXIMOS PASSOS
   1. M2.3 (alocador físico) aplicando o ADR-0007.
   2. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.
+
+================================================================================
+2026-10-21 — M2.3 alocador físico de frames
+================================================================================
+
+ESCOPO
+  O kernel constrói um alocador de frames de 4 KiB a partir do mapa de memória
+  pré-ExitBootServices, reserva a memória que ainda pertence ao kernel e
+  exercita alocação e liberação reais antes de encerrar o boot.
+
+DECISÕES
+  - Bitmap de 1 bit por frame: 1 = usado/reservado, 0 = livre. O buffer tem
+    128 KiB em .bss e cobre até 4 GiB (1.048.576 frames); o prefixo usado é
+    dimensionado pelo mapa. Memória acima de 4 GiB é ignorada e contabilizada
+    no log.
+  - Apenas descritores conventional são liberados. boot_services_code/data
+    ficam cobertos pelo bitmap, mas usados e contabilizados como quarentena:
+    as page tables ativas do firmware vivem neles e só o M2.4 pode liberá-los
+    com segurança. Isso adia, sem alterar, a política do ADR-0007.
+  - Reservas explícitas depois de liberar o conventional: primeiros 1 MiB,
+    imagem do kernel (inclui TSS, IST e o próprio bitmap), pilha de boot,
+    boot_info, buffer do mapa e framebuffer.
+  - O primeiro 1 MiB é reservado para manter IVT/BDA/scratch do firmware fora
+    do pool e fazer um ponteiro nulo faultar em vez de escrever em memória
+    válida.
+  - Alocação first-fit com hint rotativo; liberar um frame move o hint para o
+    menor frame liberado, então liberar e alocar reusa o mesmo frame. Endereço
+    desalinhado, fora do pool e double free são erros explícitos.
+  - O self-test de boot aloca 3 frames, escreve o primeiro e o último u64 de
+    cada um, libera e realoca o menor; qualquer sobreposição com memória do
+    kernel, endereço inválido ou falha de escrita para o boot com FATAL.
+  - O teste de estresse fica no host: 16.384 frames (64 MiB), reservas no
+    estilo do kernel, esgota o pool, libera cada terceiro frame alocado,
+    realoca e verifica duplicatas e sobreposições.
+
+VALIDAÇÃO LOCAL (QEMU/OVMF, Fedora 44, Zig 0.17.0, QEMU 10.2.2)
+  zig fmt --check build.zig boot kernel shared tools -> PASS
+  zig build                                           -> PASS
+  zig test kernel/mm/frames.zig                       -> PASS (8/8)
+  zig build test                                      -> PASS
+    boot-test:          PASS
+    fault-test:         PASS (UD e GP depois do alocador; frames=ok)
+    ebs-retry-test:     PASS (chave 0x731 rejeitada; 0x733 aceita)
+    double-fault-test:  PASS (IST 0x129190..0x12d190, handler 0x12d127)
+
+  Boot normal:
+    kernel image: 0x100000..0x12d200
+    frame allocator: 130904 frames, 118579 free, 12325 used (511 MiB covered)
+    frame allocator: bitmap=16363 bytes, boot_services=42 MiB quarantined,
+                     above 4 GiB=0 MiB ignored
+    frame allocator: reserved low 1 MiB, kernel image, boot stack, boot_info,
+                     map and framebuffer
+    frame allocator: self-test ok, allocated 0x12e000 0x12f000 0x130000 and
+                     reused 0x12e000
+    post-ExitBootServices: ... frames=ok ...
+
+  O primeiro frame livre (0x12e000) fica acima de kernel_end (0x12d200) e
+  fora da IST (0x1291a0..0x12d1a0). O teste de dupla falta continua usando a
+  IST e não reinicia a máquina.
+
+  Evidência medida: docs/testing/m2.3-frames-evidence.md
+  Critérios:        docs/specs/m2.3-physical-frames.md
+  Decisão:          docs/adr/ADR-0009-physical-frame-allocator.md
+
+LIMITAÇÕES / RISCOS
+  - Testado apenas em QEMU/OVMF; nenhum hardware físico foi exercitado.
+  - O kernel ainda usa o identity map do firmware. O self-test só escreve nos
+    primeiros frames livres, logo acima da imagem; um consumidor que aloque
+    memória alta antes do M2.4 pode faultar.
+  - 42 MiB de boot services continuam indisponíveis até o M2.4, que precisa
+    instalar as page tables próprias antes de liberar a quarentena.
+  - O bitmap cobre apenas os primeiros 4 GiB. Memória above 4 GiB não é
+    alocável e é apenas registrada.
+  - O bitmap é um buffer estático de 128 KiB; ele cresce a imagem do kernel
+    mesmo em máquinas com pouca RAM.
+  - Não há locking. O kernel roda com interrupções desabilitadas e um único
+    contexto de CPU; um scheduler futuro precisa adicionar sincronização.
+  - A liberação de um frame reservado não é detectada: o bitmap não distingue
+    reserva de alocação. Hoje só o self-test libera frames, e apenas os seus.
+
+PRÓXIMOS PASSOS
+  1. Publicar a branch, abrir o PR, aguardar CI verde e integrar em main.
+  2. M2.4: page tables próprias, W^X/NX e liberação da quarentena de boot
+     services.
+  3. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.

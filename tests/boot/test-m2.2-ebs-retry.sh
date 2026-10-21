@@ -71,7 +71,7 @@ expected=(
   "[azura] ExitBootServices: success"
   "[azura] === AzuraOS kernel"
   "[azura] boot services: exited, memory map key="
-  "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok framebuffer=ok memory_map=ok"
+  "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok frames=ok framebuffer=ok memory_map=ok"
   "[azura] boot complete, halting"
 )
 

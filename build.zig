@@ -241,12 +241,23 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
+
+    // The frame allocator is pure bookkeeping: the host tests drive it with
+    // synthetic maps, including a full exhaust/release/reuse stress run.
+    const frames_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("kernel/mm/frames.zig"),
+            .target = host_target,
+            .optimize = .Debug,
+        }),
+    });
     const unit_test_run = b.addRunArtifact(unit_tests);
     const shared_test_run = b.addRunArtifact(shared_tests);
     const gdt_test_run = b.addRunArtifact(gdt_tests);
     const exception_test_run = b.addRunArtifact(exception_tests);
     const tss_test_run = b.addRunArtifact(tss_tests);
     const ist_test_run = b.addRunArtifact(ist_tests);
+    const frames_test_run = b.addRunArtifact(frames_tests);
     const unit_test_step = b.step("unit-test", "Run the host unit tests");
     unit_test_step.dependOn(&unit_test_run.step);
     unit_test_step.dependOn(&shared_test_run.step);
@@ -254,6 +265,7 @@ pub fn build(b: *std.Build) void {
     unit_test_step.dependOn(&exception_test_run.step);
     unit_test_step.dependOn(&tss_test_run.step);
     unit_test_step.dependOn(&ist_test_run.step);
+    unit_test_step.dependOn(&frames_test_run.step);
 
     const boot_test = b.addSystemCommand(&.{ "bash", "tests/boot/test-m1-boot.sh" });
     boot_test.addArg(esp_image);

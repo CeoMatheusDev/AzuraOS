@@ -39,14 +39,15 @@ regression of the boot.
 
 In progress. M2.1 is merged into `main` (PR #1), M2.2 is merged into `main`
 (PR #2, `02e5f3d`) and M2.2b (TSS and IST) is merged into `main` (PR #5,
-`c376528`).
+`c376528`). M2.3 (physical frame allocator) is implemented on
+`feat/m2.3-physical-frames`; the pull request and CI are pending.
 
 | Step | Content | State |
 | ---- | ------- | ----- |
 | M2.1 | Own GDT, own segments | done, `docs/adr/ADR-0004-kernel-gdt.md` |
 | M2.2 | `ExitBootServices` with the memory map key | done, merged in `02e5f3d`; evidence in `docs/testing/m2.2-exitbootservices-evidence.md`; ownership policy in `docs/adr/ADR-0007-memory-ownership-after-exitbootservices.md` |
 | M2.2b | TSS and IST stacks for `#NMI`, `#DF` and `#MC` | done, merged in `c376528`; evidence in `docs/testing/m2.2b-tss-ist-evidence.md`; decision in `docs/adr/ADR-0008-tss-and-ist.md` |
-| M2.3 | Physical memory manager, frame allocation and release | not started |
+| M2.3 | Physical memory manager, frame allocation and release | implemented, PR pending; evidence in `docs/testing/m2.3-frames-evidence.md`; decision in `docs/adr/ADR-0009-physical-frame-allocator.md` |
 | M2.4 | Own paging, W^X, NX, controlled page faults | not started |
 | M2.5 | Kernel heap, allocation and fragmentation tests | not started |
 | M2.6 | Timer, monotonic clock, verified interrupts | not started |
@@ -70,6 +71,13 @@ needed before interrupts become complex or processes are isolated. Without it
 a fault on the kernel stack cannot be reported. It was implemented right
 after M2.2 as M2.2b; the decision is in `docs/adr/ADR-0008-tss-and-ist.md`
 and the acceptance criteria in `docs/specs/m2.2b-tss-ist.md`.
+
+M2.3 implements the frame allocator over conventional memory and defers the
+boot services reclassification to M2.4. The firmware page tables are still
+active and live in boot services memory, so freeing those ranges now would
+free the page tables under the kernel. ADR-0009 records the decision, the
+4 GiB bitmap limit and the boot self-test; the acceptance criteria are in
+`docs/specs/m2.3-physical-frames.md`.
 
 ## M3 — Execution
 

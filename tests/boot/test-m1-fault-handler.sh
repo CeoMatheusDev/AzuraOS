@@ -93,7 +93,7 @@ run_fault() {
     echo "FAIL ($mode): the bootloader did not exit the boot services" >&2
     failures=$((failures + 1))
   fi
-  if ! grep -q -F "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok framebuffer=ok memory_map=ok" "$serial_log"; then
+  if ! grep -q -F "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok frames=ok framebuffer=ok memory_map=ok" "$serial_log"; then
     echo "FAIL ($mode): the kernel did not report a healthy post-ExitBootServices environment" >&2
     failures=$((failures + 1))
   fi
