@@ -43,9 +43,10 @@ RIP, the RIP as the CS, and the CS as the RFLAGS.
 
 ### The stub did not satisfy the ABI it calls through
 
-The System V AMD64 ABI requires the stack pointer to be 16 byte aligned at
-a call, so that the callee sees `RSP % 16 == 8`, and the direction flag to
-be clear.
+The System V AMD64 ABI imposes two conditions on a call. Immediately
+**before** the `call`, `RSP` must be a multiple of 16; at the **first
+instruction of the callee**, after the return address has been pushed,
+`RSP % 16` must be 8. The direction flag must also be clear.
 
 The processor guarantees neither on an exception entry. It aligns the stack
 pointer to a 16 byte boundary **before** pushing the frame (Intel SDM
@@ -90,7 +91,7 @@ before it calls the handler:
 ```
 movq $<vector>, %rdi     the vector number
 movq %rsp, %rsi         the pointer to the CPU's stack frame
-andq $-16, %rsp         16 byte aligned stack, as the ABI demands
+andq $-16, %rsp         RSP % 16 == 0 immediately before the call
 cld                     the ABI demands a clear direction flag
 callq azuraCommonHandler
 ```
@@ -98,6 +99,12 @@ callq azuraCommonHandler
 The frame pointer is read **before** the alignment, so the frame itself is
 never touched: `andq` only lowers the stack pointer, and the CPU's frame
 stays where it was pushed.
+
+The stub clobbers RDI, RSI, RSP and the flags. Nothing is saved, because
+the stub never returns: the handler halts the machine and the interrupted
+context is never resumed. A future change that resumes the faulting code
+would have to save and restore the whole register state before this stub
+would be correct.
 
 The bytes of this prologue are part of the contract and are checked at
 boot: `idt.verifyEntries` reads them at the address every IDT entry names,

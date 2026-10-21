@@ -405,9 +405,11 @@ DEFEITO 1 — O QUADRO DA EXCEÇÃO ERA LIDO COM DESLOCAMENTO FIXO
   isso entra nos testes unitários do host.
 
 DEFEITO 2 — O STUB NÃO CUMPRIA A ABI QUE ELE ATRAVESSA
-  A ABI System V exige pilha alinhada em 16 bytes na chamada (o chamado vê
-  RSP % 16 == 8) e DF zerado. O processador não garante nenhum dos dois na
-  entrada de uma exceção: ele alinha a pilha em 16 bytes ANTES de empurrar o
+  A ABI System V impõe duas condições na chamada: imediatamente ANTES do
+  call, RSP deve ser múltiplo de 16; na PRIMEIRA instrução do chamado, depois
+  que o endereço de retorno foi empurrado, RSP % 16 == 8. Além disso, DF deve
+  estar zerado. O processador não garante nenhuma delas na entrada de uma
+  exceção: ele alinha a pilha em 16 bytes ANTES de empurrar o
   quadro (SDM Vol. 3A, 7.14.2), e o quadro tem 40 bytes nos vetores sem código
   de erro e 48 bytes nos demais, de modo que a paridade da base depende do
   vetor. O DF o processador nem toca.

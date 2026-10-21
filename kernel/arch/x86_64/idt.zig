@@ -139,18 +139,25 @@ pub fn install(code_selector: u16) void {
 /// the callee, which the processor does not guarantee on an exception
 /// entry:
 ///
-///   * the stack pointer must be 16 byte aligned at the call, so that the
-///     callee sees `RSP % 16 == 8`. The processor aligns the stack pointer
-///     to a 16 byte boundary BEFORE pushing the frame (Intel SDM Vol. 3A,
-///     7.14.2), and the frame is 24 bytes long for the vectors that push no
-///     error code and 32 bytes long for the vectors that push one. The
-///     parity of the frame base therefore depends on the vector, and
-///     without the fix the handler would be entered with a misaligned stack
-///     pointer for one of the two classes. Any `movaps` to a 16 byte
-///     aligned object inside the handler would then fault with #GP and
-///     hide the original fault;
+///   * the stack alignment. Immediately before the `call`, `RSP` must be a
+///     multiple of 16; at the first instruction of the callee, after the
+///     return address has been pushed, `RSP % 16` must be 8. The processor
+///     aligns the stack pointer to a 16 byte boundary BEFORE pushing the
+///     frame (Intel SDM Vol. 3A, 7.14.2), and the frame is 40 bytes long
+///     for the vectors that push no error code and 48 bytes long for the
+///     vectors that push one. The parity of the frame base therefore
+///     depends on the vector, and without the fix the handler would be
+///     entered with a misaligned stack pointer for one of the two classes.
+///     Any `movaps` to a 16 byte aligned object inside the handler would
+///     then fault with #GP and hide the original fault;
 ///   * the direction flag must be clear. The processor does not touch it on
 ///     an exception entry, and a faulting instruction may well have set it.
+///
+/// The stub clobbers RDI, RSI, RSP and the flags. Nothing has to be
+/// preserved, because the stub never returns: the handler halts the
+/// machine, and the context that was interrupted is never resumed. A build
+/// step that does try to resume it would have to save and restore the
+/// whole register state, and this stub would not be enough.
 fn makeStub(comptime vector: u8) usize {
     const Stub = struct {
         const vector_id: u8 = vector;
@@ -159,7 +166,7 @@ fn makeStub(comptime vector: u8) usize {
             asm volatile (
                 \\ movq %[v], %%rdi        // vector number
                 \\ movq %%rsp, %%rsi       // pointer to the CPU's stack frame
-                \\ andq $-16, %%rsp        // 16 byte aligned stack, as the ABI demands
+                \\ andq $-16, %%rsp        // RSP % 16 == 0 immediately before the call
                 \\ cld                    // the ABI demands a clear direction flag
                 \\ callq azuraCommonHandler
                 :
