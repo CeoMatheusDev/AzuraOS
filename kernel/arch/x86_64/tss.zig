@@ -96,7 +96,8 @@ pub fn firmwareSelectorCompatible(firmware_cs: u16) bool {
 pub fn validIstStack(base: u64, top: u64) bool {
     if (base == 0 or top <= base or top - base < 4096) return false;
     if ((top & 15) != 0) return false;
-    return canonical48(base) and canonical48(top - 1);
+    return canonical48(base) and canonical48(top - 1) and
+        ((base >> 47) & 1) == (((top - 1) >> 47) & 1);
 }
 
 fn canonical48(address: u64) bool {
