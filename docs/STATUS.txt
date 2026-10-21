@@ -697,6 +697,14 @@ VALIDAÇÃO LOCAL (QEMU/OVMF, Fedora 44, Zig 0.17.0)
 
   Evidência medida: docs/testing/m2.2b-tss-ist-evidence.md
 
+PUBLICAÇÃO E CI
+  Branch feat/m2.2b-tss-ist publicada (373b160, de953c6); PR #5 aberto em
+  https://github.com/CeoMatheusDev/AzuraOS/pull/5.
+  Runs 39624905979 (push) e 39624939058 (PR): zig fmt PASS e
+  Build and test PASS (3m24s-3m34s). O passo novo
+  "Run the double fault IST test" rodou no CI e passou:
+  IST 0x1077d0..0x10b7d0, handler 0x10b767.
+
 LIMITAÇÕES / RISCOS
   - Testado apenas em QEMU/OVMF; nenhum hardware físico foi exercitado.
   - As page tables ainda são as do firmware; o kernel só as lê e registra.
@@ -710,6 +718,6 @@ LIMITAÇÕES / RISCOS
     (-Dstale-map-key=true), não por uma condição espontânea do firmware.
 
 PRÓXIMOS PASSOS
-  1. Publicar a branch M2.2b e abrir o PR com a CI verde.
+  1. Aguardar a revisão e o merge do PR #5 (CI verde).
   2. M2.3 (alocador físico) aplicando o ADR-0007.
   3. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.
