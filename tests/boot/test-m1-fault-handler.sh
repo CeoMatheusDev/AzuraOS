@@ -93,7 +93,7 @@ run_fault() {
     echo "FAIL ($mode): the bootloader did not exit the boot services" >&2
     failures=$((failures + 1))
   fi
-  if ! grep -q -F "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok framebuffer=ok memory_map=ok" "$serial_log"; then
+  if ! grep -q -F "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok framebuffer=ok memory_map=ok" "$serial_log"; then
     echo "FAIL ($mode): the kernel did not report a healthy post-ExitBootServices environment" >&2
     failures=$((failures + 1))
   fi
@@ -125,6 +125,21 @@ run_fault() {
 
   if ! grep -q -F "[azura] KERNEL FAULT: machine halted" "$serial_log"; then
     echo "FAIL ($mode): the handler did not halt the machine" >&2
+    failures=$((failures + 1))
+  fi
+
+  # Ordinary faults must stay on the stack the interrupted context was using;
+  # the IST is only for the critical vectors. The kernel logs the boot stack
+  # bounds at start-up and the handler logs the stack it is actually using.
+  local handler_stack kernel_stack_base kernel_stack_top
+  handler_stack=$(sed -nE 's/.*KERNEL FAULT: handler stack=(0x[0-9a-f]+).*/\1/p' "$serial_log" | head -1)
+  kernel_stack_base=$(sed -nE 's/.*\[azura\] stack: base=(0x[0-9a-f]+) top=0x[0-9a-f]+.*/\1/p' "$serial_log" | head -1)
+  kernel_stack_top=$(sed -nE 's/.*\[azura\] stack: base=0x[0-9a-f]+ top=(0x[0-9a-f]+).*/\1/p' "$serial_log" | head -1)
+  if [[ -z "$handler_stack" || -z "$kernel_stack_base" || -z "$kernel_stack_top" ]]; then
+    echo "FAIL ($mode): could not read the handler stack or the boot stack bounds" >&2
+    failures=$((failures + 1))
+  elif (( handler_stack < kernel_stack_base || handler_stack >= kernel_stack_top )); then
+    echo "FAIL ($mode): the ordinary fault ran on stack $handler_stack, outside the interrupted stack $kernel_stack_base..$kernel_stack_top" >&2
     failures=$((failures + 1))
   fi
 

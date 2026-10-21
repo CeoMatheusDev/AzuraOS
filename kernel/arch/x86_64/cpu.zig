@@ -80,6 +80,28 @@ pub fn codeSelector() u16 {
     );
 }
 
+/// Load the task register with a TSS selector.
+///
+/// The selector must name a present TSS descriptor in the GDT that is
+/// currently loaded; otherwise the instruction raises #GP. See `tss.zig`.
+pub fn loadTaskRegister(selector: u16) void {
+    asm volatile ("ltrw %[selector]"
+        :
+        : [selector] "r" (selector),
+        : .{ .memory = true });
+}
+
+/// Read the task register back.
+///
+/// A value different from the selector the kernel loaded means the processor
+/// is using another TSS (or none), and the IST stacks in the IDT would point
+/// into memory the kernel does not control.
+pub fn taskRegister() u16 {
+    return asm volatile ("strw %[value]"
+        : [value] "=r" (-> u16),
+    );
+}
+
 /// Disable hardware interrupts.
 pub fn disableInterrupts() void {
     asm volatile ("cli");
