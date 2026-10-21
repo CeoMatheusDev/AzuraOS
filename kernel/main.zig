@@ -4,16 +4,19 @@
 //! The bootloader jumps here with RDI pointing at the `boot_info` structure
 //! described in shared/boot_info.zig, after it has called ExitBootServices.
 //!
-//! Scope of this milestone (M2.2b):
+//! Scope of this milestone (M2.3):
 //!   * validate the boot protocol contract,
 //!   * prove that the boot services are gone and that the environment they
 //!     left behind (stack, GDT, IDT, framebuffer, memory map) is still valid,
 //!   * install the IDT so CPU faults are reported instead of rebooting,
 //!   * install a TSS whose IST1 stack takes over on #NMI, #DF and #MC,
+//!   * build a physical frame allocator from the pre-ExitBootServices map,
+//!     reserve everything the kernel still owns and exercise allocation and
+//!     release at boot,
 //!   * stop the machine in a controlled way.
 //!
-//! NOT in this milestone: the kernel's own page tables (M2.4), the physical
-//! memory manager (M2.3), heap, scheduler and drivers.
+//! NOT in this milestone: the kernel's own page tables (M2.4), heap,
+//! scheduler and drivers.
 
 const std = @import("std");
 const shared = @import("shared");
@@ -25,6 +28,7 @@ const cpu = @import("arch/x86_64/cpu.zig");
 const gdt = @import("arch/x86_64/gdt.zig");
 const idt = @import("arch/x86_64/idt.zig");
 const tss = @import("arch/x86_64/tss.zig");
+const frames = @import("mm/frames.zig");
 
 /// Number of memory map entries printed in the boot log.
 const memory_map_preview = 8;
@@ -36,6 +40,21 @@ const page_size: u64 = 4096;
 /// arbitrary but distinctive, so a mismatch is unambiguous in the log.
 const stack_probe_pattern: u64 = 0x5a17_c0de_1234_5678;
 
+/// Pattern written into the frames during the allocator self-test.
+const frame_probe_pattern: u64 = 0xa5a5_5a5a_0f0f_f0f0;
+
+/// Bitmap for the physical frame allocator. It covers up to 4 GiB (one bit
+/// per 4 KiB frame, 128 KiB in total); the prefix used at boot depends on the
+/// highest conventional address in the memory map. The buffer lives in
+/// `.bss`, so the bootloader zeroes it and the kernel pays no file size for
+/// it.
+var frame_bitmap: [frames.max_bitmap_bytes]u8 align(16) = undefined;
+
+/// The allocator built from the boot memory map. It is initialised after the
+/// exception environment is verified, so a fault during the self-test is
+/// reported by the kernel handler instead of rebooting.
+var frame_allocator: frames.Allocator = undefined;
+
 /// Kernel entry point. The build system points the ELF entry symbol here.
 ///
 /// Invariants:
@@ -44,7 +63,7 @@ const stack_probe_pattern: u64 = 0x5a17_c0de_1234_5678;
 ///   * the CPU is in 64-bit long mode with interrupts disabled.
 pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     com1.init();
-    com1.write("[azura] === AzuraOS kernel v0.1.0 (M2.2b) ===\n");
+    com1.write("[azura] === AzuraOS kernel v0.1.0 (M2.3) ===\n");
 
     if (boot_info.magic != shared.magic) {
         com1.print("[azura] FATAL: bad boot magic 0x{x}\n", .{boot_info.magic});
@@ -152,7 +171,11 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     // and the framebuffer are readable.
     verifyStack(boot_info);
     verifyIdt();
-    com1.write("[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok framebuffer=ok memory_map=ok\n");
+
+    // The map and the exception environment are trusted now. Build the
+    // allocator and prove that it can hand out and take back real frames.
+    initFrames(boot_info);
+    com1.write("[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok frames=ok framebuffer=ok memory_map=ok\n");
 
     if (build_options.fault_mode.len != 0 and !std.mem.eql(u8, build_options.fault_mode, "none")) {
         injectFault(build_options.fault_mode);
@@ -563,4 +586,270 @@ fn verifyIdt() void {
         com1.write("[azura] FATAL: the IDT register reads back empty\n");
         cpu.haltForever();
     }
+}
+
+/// Build the physical frame allocator from the map the bootloader handed
+/// over, reserve everything the kernel still owns and prove the pool works.
+///
+/// Policy (ADR-0009):
+///   * only `conventional` memory becomes free;
+///   * the boot services stay quarantined: the kernel is still running on
+///     the firmware's page tables, and those tables live in boot services
+///     memory. Reclaiming it before M2.4 would free the tables under the
+///     running kernel;
+///   * the kernel image, the boot stack, the boot_info structure, the map
+///     buffer and the framebuffer are reserved explicitly, even though the
+///     map already describes most of them as loader data;
+///   * memory above 4 GiB is ignored by the bitmap and counted in the log.
+fn initFrames(boot_info: *shared.boot_info) void {
+    var highest: u64 = 0;
+    var boot_services_pages: u64 = 0;
+    var ignored_pages: u64 = 0;
+
+    var index: u32 = 0;
+    while (index < boot_info.memory_map_count) : (index += 1) {
+        const descriptor = descriptorAt(boot_info, index);
+        if (descriptor.number_of_pages == 0) continue;
+
+        // The allocator revalidates the ranges it will mark. `printMemoryMap`
+        // already rejected a wrapping descriptor, but the allocator must not
+        // depend on another function having run first.
+        const max_pages = (std.math.maxInt(u64) - descriptor.physical_start) / page_size;
+        if (descriptor.number_of_pages > max_pages) {
+            com1.print("[azura] FATAL: memory map entry {d} wraps the address space\n", .{index});
+            cpu.haltForever();
+        }
+        const end = descriptor.physical_start + descriptor.number_of_pages * page_size;
+        const is_conventional = descriptor.type == @backingInt(shared.memory_type.conventional);
+        const is_boot_services = descriptor.type == @backingInt(shared.memory_type.boot_services_code) or
+            descriptor.type == @backingInt(shared.memory_type.boot_services_data);
+
+        // The bitmap covers conventional memory and, ahead of time, the
+        // boot services regions that M2.4 may reclaim. Boot services stay
+        // used in M2.3, so covering them costs a few used bits but means the
+        // pool does not have to be resized when the page tables become the
+        // kernel's own.
+        if (is_conventional or is_boot_services) {
+            if (descriptor.physical_start < frames.max_physical_address) {
+                highest = @max(highest, @min(end, frames.max_physical_address));
+            }
+        }
+        if (is_conventional and end > frames.max_physical_address) {
+            const above = @max(descriptor.physical_start, frames.max_physical_address);
+            ignored_pages += (end - above) / page_size;
+        }
+        if (is_boot_services) {
+            boot_services_pages += descriptor.number_of_pages;
+        }
+    }
+
+    if (highest == 0) {
+        com1.write("[azura] FATAL: the memory map has no conventional memory\n");
+        cpu.haltForever();
+    }
+
+    const frame_count_64 = (highest + page_size - 1) / page_size;
+    if (frame_count_64 == 0 or frame_count_64 > @as(u64, frames.max_frames)) {
+        com1.print("[azura] FATAL: the memory map needs {d} frames, the bitmap covers {d}\n", .{
+            frame_count_64,
+            frames.max_frames,
+        });
+        cpu.haltForever();
+    }
+    const frame_count: usize = @intCast(frame_count_64);
+    const bitmap_bytes = (frame_count + 7) / 8;
+    if (bitmap_bytes > frame_bitmap.len) {
+        com1.print("[azura] FATAL: the frame bitmap needs {d} bytes, {d} are available\n", .{
+            bitmap_bytes,
+            frame_bitmap.len,
+        });
+        cpu.haltForever();
+    }
+
+    frame_allocator = frames.Allocator.init(frame_bitmap[0..bitmap_bytes], frame_count) catch {
+        com1.write("[azura] FATAL: could not initialise the frame allocator\n");
+        cpu.haltForever();
+    };
+
+    // Free only the conventional descriptors. Boot services, loader code and
+    // data, runtime services, ACPI, reserved and MMIO all stay used.
+    index = 0;
+    while (index < boot_info.memory_map_count) : (index += 1) {
+        const descriptor = descriptorAt(boot_info, index);
+        if (descriptor.type != @backingInt(shared.memory_type.conventional)) continue;
+        if (descriptor.number_of_pages == 0) continue;
+
+        const max_pages = (std.math.maxInt(u64) - descriptor.physical_start) / page_size;
+        if (descriptor.number_of_pages > max_pages) {
+            com1.print("[azura] FATAL: memory map entry {d} wraps the address space\n", .{index});
+            cpu.haltForever();
+        }
+        const end = descriptor.physical_start + descriptor.number_of_pages * page_size;
+        frame_allocator.markFreeRange(descriptor.physical_start, end);
+    }
+
+    // Keep the first MiB out of the pool. UEFI labels the real-mode IVT, the
+    // BDA and the firmware's low scratch area as conventional after
+    // ExitBootServices, but nothing in the kernel needs them, and reserving
+    // them turns a null-pointer dereference into a fault instead of a write
+    // to a valid frame.
+    frame_allocator.reserveRange(0, 1024 * 1024);
+
+    // Reserve the ranges the policy cannot express through the memory type,
+    // plus the structures the kernel is actively using.
+    frame_allocator.reserveRange(boot_info.kernel_start, boot_info.kernel_end);
+    frame_allocator.reserveRange(boot_info.stack_base, boot_info.stack_top);
+
+    const info_start = @intFromPtr(boot_info);
+    frame_allocator.reserveRange(info_start, info_start + @sizeOf(shared.boot_info));
+
+    const map_bytes = @as(u64, boot_info.memory_map_count) * @as(u64, boot_info.memory_map_descriptor_size);
+    if (boot_info.memory_map == 0 or map_bytes > std.math.maxInt(u64) - boot_info.memory_map) {
+        com1.write("[azura] FATAL: the memory map range wraps the address space\n");
+        cpu.haltForever();
+    }
+    frame_allocator.reserveRange(boot_info.memory_map, boot_info.memory_map + map_bytes);
+
+    if (boot_info.framebuffer_present != 0) {
+        const framebuffer = boot_info.framebuffer;
+        if (framebuffer.size > std.math.maxInt(u64) - framebuffer.base) {
+            com1.write("[azura] FATAL: the framebuffer range wraps the address space\n");
+            cpu.haltForever();
+        }
+        frame_allocator.reserveRange(framebuffer.base, framebuffer.base + framebuffer.size);
+    }
+
+    const stats = frame_allocator.stats();
+    if (stats.free == 0) {
+        com1.write("[azura] FATAL: the frame allocator has no free frame\n");
+        cpu.haltForever();
+    }
+    com1.print("[azura] frame allocator: {d} frames, {d} free, {d} used ({d} MiB covered)\n", .{
+        stats.total,
+        stats.free,
+        stats.used,
+        frame_allocator.capacityBytes() / (1024 * 1024),
+    });
+    com1.print("[azura] frame allocator: bitmap={d} bytes, boot_services={d} MiB quarantined, above 4 GiB={d} MiB ignored\n", .{
+        bitmap_bytes,
+        boot_services_pages * page_size / (1024 * 1024),
+        ignored_pages * page_size / (1024 * 1024),
+    });
+    com1.write("[azura] frame allocator: reserved low 1 MiB, kernel image, boot stack, boot_info, map and framebuffer\n");
+
+    frameSelfTest(boot_info);
+}
+
+/// Allocate three frames, write both ends of each one, release them and
+/// reallocate the lowest one. A frame that overlaps kernel-owned memory, an
+/// unmapped frame or a broken bit operation stops the boot.
+fn frameSelfTest(boot_info: *shared.boot_info) void {
+    const free_before = frame_allocator.stats().free;
+    if (free_before < 3) {
+        com1.print("[azura] FATAL: the frame self-test needs 3 free frames, {d} available\n", .{free_before});
+        cpu.haltForever();
+    }
+
+    var addresses: [3]u64 = undefined;
+    for (&addresses) |*slot| {
+        const address = frame_allocator.allocate() orelse {
+            com1.write("[azura] FATAL: the frame self-test could not allocate a frame\n");
+            cpu.haltForever();
+        };
+        slot.* = address;
+
+        if (address % page_size != 0 or address >= frame_allocator.capacityBytes()) {
+            com1.print("[azura] FATAL: the frame allocator returned an invalid address 0x{x}\n", .{address});
+            cpu.haltForever();
+        }
+        if (overlapsOwnedRange(address, boot_info)) {
+            com1.print("[azura] FATAL: the frame allocator returned kernel-owned memory 0x{x}\n", .{address});
+            cpu.haltForever();
+        }
+
+        const expected = frame_probe_pattern ^ address;
+        const head: *volatile u64 = @ptrFromInt(address);
+        head.* = expected;
+        if (head.* != expected) {
+            com1.print("[azura] FATAL: frame write/read mismatch at 0x{x}\n", .{address});
+            cpu.haltForever();
+        }
+
+        const tail_address = address + page_size - @sizeOf(u64);
+        const tail: *volatile u64 = @ptrFromInt(tail_address);
+        const tail_expected = ~expected;
+        tail.* = tail_expected;
+        if (tail.* != tail_expected) {
+            com1.print("[azura] FATAL: frame tail write/read mismatch at 0x{x}\n", .{tail_address});
+            cpu.haltForever();
+        }
+    }
+    if (frame_allocator.stats().free != free_before - 3) {
+        com1.write("[azura] FATAL: the frame allocator lost track of the self-test allocations\n");
+        cpu.haltForever();
+    }
+
+    const lowest = @min(addresses[0], @min(addresses[1], addresses[2]));
+    for (addresses) |address| {
+        frame_allocator.release(address) catch {
+            com1.print("[azura] FATAL: could not release the self-test frame 0x{x}\n", .{address});
+            cpu.haltForever();
+        };
+    }
+    if (frame_allocator.stats().free != free_before) {
+        com1.write("[azura] FATAL: the frame allocator did not recover the self-test frames\n");
+        cpu.haltForever();
+    }
+
+    const reused = frame_allocator.allocate() orelse {
+        com1.write("[azura] FATAL: the frame allocator did not reuse a released frame\n");
+        cpu.haltForever();
+    };
+    if (reused != lowest) {
+        com1.print("[azura] FATAL: the frame allocator reused 0x{x}, expected the lowest released frame 0x{x}\n", .{
+            reused,
+            lowest,
+        });
+        cpu.haltForever();
+    }
+    frame_allocator.release(reused) catch {
+        com1.print("[azura] FATAL: could not release the reused frame 0x{x}\n", .{reused});
+        cpu.haltForever();
+    };
+    if (frame_allocator.stats().free != free_before) {
+        com1.write("[azura] FATAL: the frame allocator did not recover the reused frame\n");
+        cpu.haltForever();
+    }
+
+    com1.print("[azura] frame allocator: self-test ok, allocated 0x{x} 0x{x} 0x{x} and reused 0x{x}\n", .{
+        addresses[0],
+        addresses[1],
+        addresses[2],
+        reused,
+    });
+}
+
+/// Whether the frame at `address` overlaps memory the kernel must keep, even
+/// if the allocator's policy were wrong. This is a second, independent guard
+/// for the boot self-test.
+fn overlapsOwnedRange(address: u64, boot_info: *shared.boot_info) bool {
+    const end = address + page_size;
+    if (rangeOverlaps(address, end, boot_info.kernel_start, boot_info.kernel_end)) return true;
+    if (rangeOverlaps(address, end, boot_info.stack_base, boot_info.stack_top)) return true;
+
+    const info_start = @intFromPtr(boot_info);
+    if (rangeOverlaps(address, end, info_start, info_start + @sizeOf(shared.boot_info))) return true;
+
+    const map_bytes = @as(u64, boot_info.memory_map_count) * @as(u64, boot_info.memory_map_descriptor_size);
+    if (rangeOverlaps(address, end, boot_info.memory_map, boot_info.memory_map + map_bytes)) return true;
+
+    if (boot_info.framebuffer_present != 0) {
+        const framebuffer = boot_info.framebuffer;
+        if (rangeOverlaps(address, end, framebuffer.base, framebuffer.base + framebuffer.size)) return true;
+    }
+    return false;
+}
+
+fn rangeOverlaps(a_start: u64, a_end: u64, b_start: u64, b_end: u64) bool {
+    return a_start < b_end and b_start < a_end;
 }
