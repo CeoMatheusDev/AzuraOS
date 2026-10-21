@@ -120,6 +120,12 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     // to name that selector.
     idt.install(gdt.kernel_code_selector, true);
 
+    if (!idt.verifyIstConfiguration(true, gdt.kernel_code_selector)) {
+        com1.write("[azura] FATAL: IDT selector or IST routing mismatch\n");
+        cpu.haltForever();
+    }
+    com1.write("[azura] double-fault gate: IST1 configured\n");
+
     // Check that every entry really points at the beginning of its stub.
     if (idt.verifyEntries()) |vector| {
         com1.print("[azura] FATAL: IDT entry for vector {d} does not point at its stub\n", .{vector});
