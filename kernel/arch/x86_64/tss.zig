@@ -65,6 +65,8 @@ test "TSS descriptor encodes 64-bit base" {
     const entry = descriptor(base);
     try std.testing.expectEqual(@as(u8, 0x89), entry.access);
     try std.testing.expectEqual(@as(u16, 103), entry.limit_low);
+    try std.testing.expectEqual(@as(u8, 0), entry.limit_high_flags);
+    try std.testing.expectEqual(@as(u32, 0), entry.reserved);
     try std.testing.expectEqual(base,
         @as(u64, entry.base_low) |
         (@as(u64, entry.base_middle) << 16) |
