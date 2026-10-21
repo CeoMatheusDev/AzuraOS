@@ -304,7 +304,11 @@ export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void 
     if (vector == 8) {
         const bounds = gdt.doubleFaultStackBounds();
         const frame_address = @intFromPtr(frame);
-        const on_ist1 = frame_address >= bounds.base and frame_address < bounds.top;
+        // #DF pushes six 8-byte words; validate the entire CPU frame, not
+        // merely its first byte, without risking an overflowing addition.
+        const frame_size: u64 = 6 * @sizeOf(u64);
+        const on_ist1 = frame_address >= bounds.base and
+            frame_address < bounds.top and bounds.top - frame_address >= frame_size;
         com1.print("[azura] DOUBLE FAULT: frame=0x{x} IST1=[0x{x},0x{x}) active={s}\n", .{
             frame_address, bounds.base, bounds.top, if (on_ist1) "yes" else "no",
         });
