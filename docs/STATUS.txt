@@ -1,17 +1,19 @@
 AZURAOS — STATUS
-Data UTC: 2026-10-20 (data da atualização; hora não aferida)
+Data UTC: 2026-10-21 (data da atualização; hora não aferida)
 Projeto: AzuraOS
 Versão planejada: 0.1.0 (marco interno M0+M1); versão/tag publicada: nenhuma
 Arquitetura: x86_64 / UEFI; AArch64 e RISC-V futuros, não suportados
 Branch: main; repositório Git inicializado e publicado pelo responsável durante
          a sessão (origin = https://github.com/CeoMatheusDev/AzuraOS.git)
-Último commit verificado: 97e3a70 "docs: record the first successful CI execution"
-                          (branch feat/m2-kernel-ownership)
+Último commit verificado: 1e87504 "Merge pull request #1 from
+                          CeoMatheusDev/feat/m2-kernel-ownership" (main);
+                          CI verde no run 39537277273
 Última tag publicada: nenhuma
 Zig version: 0.17.0 VERIFICADA no Fedora 44 (zig version -> 0.17.0)
 QEMU: 10.2.2 VERIFICADO; OVMF: edk2-ovmf-20260812 VERIFICADO
-Estado geral: M1 CONCLUÍDO e M2.1 (GDT própria) EM ANDAMENTO no branch
-              feat/m2-kernel-ownership. Evidência M1: docs/testing/m1-boot-evidence.md
+Estado geral: M1 CONCLUÍDO; M2.1 (GDT própria) CONCLUÍDO e integrado em main
+              (PR #1, merge 1e87504). Próximo marco: M2.2 (ExitBootServices).
+              Evidência M1: docs/testing/m1-boot-evidence.md
 
 OBJETIVO DA TAREFA
 M0.1: estabelecer requisitos de toolchain, estratégia de build reproduzível e inventário Fedora.
@@ -496,3 +498,54 @@ PENDÊNCIAS / PRÓXIMOS PASSOS:
 ROLLBACK: esta etapa só alterou arquivos do repositório local. Nenhuma
 configuração externa, nenhuma tag, nenhuma release, nenhum push.
 
+
+================================================================================
+2026-10-21 — MERGE DO PR #1 (M2.1)
+================================================================================
+
+REVISÃO HUMANA INCORPORADA
+  A revisão apontou uma imprecisão na frase sobre a ABI e pediu a revisão
+  final dos stubs. Correções aplicadas:
+  - A documentação agora enuncia os DOIS pontos do alinhamento: RSP % 16 == 0
+    imediatamente ANTES do call e RSP % 16 == 8 na PRIMEIRA instrução do
+    chamado, depois que o endereço de retorno foi empurrado (ADR-0005,
+    idt.zig, este log).
+  - Ao revisar essa frase apareceu um erro factual no comentário de idt.zig:
+    ele dizia 24/32 bytes para o quadro; o correto é 40/48 (5 ou 6 palavras,
+    porque RSP e SS são empurrados sempre em modo longo). Corrigido.
+  - Preservação de registradores e retorno: o stub não retorna (o handler para
+    a máquina), por isso nada é salvo; a lista de clobbers agora nomeia rdi,
+    rsi e rsp, e o comentário registra que retomar o contexto interrompido
+    exigiria salvar e restaurar o estado inteiro.
+  - .directory (KDE Dolphin) entrou no .gitignore.
+  - AzuraOS_AI_PROMPT.txt foi preservado na árvore local, fora dos commits.
+
+PUBLICAÇÃO E CI
+  7 commits publicados em feat/m2-kernel-ownership (97e3a70 -> cf65b27).
+  Runs 39534898737 (push) e 39534894963 (PR): 4 jobs, todos PASS.
+  O teste de falha rodou no CI ("PASS: the kernel exception handler reported
+  both injected faults") e o artefato m1-boot-evidence contém:
+    invalid_opcode  vector 6  (invalid opcode)      rip=0x10196e cs=0x8
+    bad_segment     vector 13 (general protection)  rip=0x101973 cs=0x8
+                    error_code=0xa0
+  O commit de merge 1e87504 foi validado pelo run 39537277273 (main): PASS.
+
+MERGE
+  PR #1 integrado em main com merge commit 1e87504, autorizado pelo
+  responsável. main deixa de depender da GDT do firmware.
+
+VALIDAÇÃO DESTA ETAPA
+  zig fmt --check build.zig boot kernel shared tools -> PASS
+  zig build test                                   -> PASS (unit + boot + fault)
+
+PENDÊNCIAS / PRÓXIMOS PASSOS:
+  1. M2.2 (ExitBootServices) em branch nova, com os critérios de
+     docs/specs/m2.2-exitbootservices.md e a política de propriedade de
+     páginas exigida pela revisão.
+  2. Tag v0.1.0: só com autorização explícita; a licença não é mais o
+     bloqueio.
+  3. Limpeza futura do CI: o artefato m1-boot-evidence (~10 MB) carrega
+     cópias de .zig-cache junto com os logs.
+
+ROLLBACK: o merge pode ser revertido com "git revert -m 1 1e87504". Nenhuma
+tag ou release foi criada.
