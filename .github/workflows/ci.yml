@@ -102,7 +102,8 @@ jobs:
             zig-out/boot/serial.log
             zig-out/boot/screen.png
             zig-out/test-boot/
-            zig-out/test-fault/
+            zig-out/test-fault-invalid_opcode/
+            zig-out/test-fault-bad_segment/
           if-no-files-found: warn
 
   formatting:
@@ -124,4 +125,4 @@ jobs:
         run: |
           set -euo pipefail
           echo "zig version: $(zig version)"
-          zig fmt --check boot kernel shared tools
+          zig fmt --check build.zig boot kernel shared tools
