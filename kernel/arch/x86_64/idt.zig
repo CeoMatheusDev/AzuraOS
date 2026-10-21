@@ -119,6 +119,21 @@ pub fn install(code_selector: u16, task_register_ready: bool) void {
     cpu.loadIdt(&descriptor);
 }
 
+/// Verify the double-fault gate uses the intended IST only after LTR.
+/// The remaining exception vectors must continue using the current stack.
+pub fn verifyIstConfiguration(task_register_ready: bool, code_selector: u16) bool {
+    for (table[0..exception_vector_count], 0..) |entry, vector| {
+        const expected_ist: u8 = if (vector == 8 and task_register_ready)
+            tss.double_fault_ist
+        else
+            0;
+        if (entry.ist != expected_ist or entry.selector != code_selector or
+            entry.type_attr != gate_type or entry.reserved != 0)
+            return false;
+    }
+    return true;
+}
+
 /// Build the per-vector trampoline.
 ///
 /// Each vector needs its own stub because the CPU does not report which
