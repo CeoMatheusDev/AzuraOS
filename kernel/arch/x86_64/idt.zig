@@ -134,6 +134,13 @@ pub fn verifyIstConfiguration(task_register_ready: bool, code_selector: u16) boo
     return true;
 }
 
+/// Return the saved stack pointer from the CPU's #DF exception frame.
+/// This is read-only diagnostics; it does not intentionally provoke a #DF.
+pub fn doubleFaultStackPointer(frame: *const Frame) u64 {
+    // #DF pushes an error code, followed by RIP, CS, RFLAGS, old RSP, SS.
+    return frame.word4;
+}
+
 /// Build the per-vector trampoline.
 ///
 /// Each vector needs its own stub because the CPU does not report which
