@@ -106,3 +106,18 @@ pub fn haltForever() noreturn {
 pub fn pause() void {
     asm volatile ("pause");
 }
+
+/// Load a segment selector that names no descriptor in the current GDT.
+///
+/// The index of the selector is far beyond the limit of the table the
+/// kernel installs, so the processor raises a general protection exception
+/// and reports the selector as the error code (Intel SDM Vol. 3A, 6.14.5).
+///
+/// The instruction never returns: the exception is raised by the load
+/// itself.
+pub fn loadInvalidSegmentSelector() void {
+    asm volatile (
+        \\ movl $0xa0, %%eax
+        \\ movw %%ax, %%es
+        ::: .{ .memory = true, .rax = true });
+}

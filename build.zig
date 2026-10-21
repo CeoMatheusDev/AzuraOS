@@ -63,12 +63,20 @@ pub fn build(b: *std.Build) void {
     // Stage 2: kernel
     // ------------------------------------------------------------------
 
+    // The fault the kernel injects on purpose, to exercise the exception
+    // handler. "none" by default: the injection is only enabled by the
+    // automated tests, never by a normal build.
+    //
+    //   none             the kernel does not inject anything
+    //   invalid_opcode   #UD (vector 6), which pushes no error code
+    //   bad_segment      #GP (vector 13), which pushes an error code
+    //
+    // The two vectors have different exception frame shapes, so both are
+    // needed to cover the frame decoding.
+    const fault_mode = b.option([]const u8, "fault-mode", "Which fault the kernel injects: none, invalid_opcode or bad_segment") orelse "none";
+
     const kernel_options = b.addOptions();
-    kernel_options.addOption(
-        bool,
-        "fault_inject",
-        b.option(bool, "fault-inject", "Make the kernel execute an invalid opcode to test the fault handler") orelse false,
-    );
+    kernel_options.addOption([]const u8, "fault_mode", fault_mode);
 
     const kernel_module = b.createModule(.{
         .root_source_file = b.path("kernel/main.zig"),

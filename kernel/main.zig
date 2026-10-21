@@ -90,14 +90,54 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     }
     com1.write("[azura] IDT installed, exception handling active\n");
 
-    if (build_options.fault_inject) {
-        com1.write("[azura] fault injection requested, executing an invalid opcode\n");
-        // #UD (vector 6): must be caught by the handler installed above.
-        asm volatile ("ud2");
-        com1.write("[azura] ERROR: the invalid opcode did not fault\n");
+    if (build_options.fault_mode.len != 0 and !std.mem.eql(u8, build_options.fault_mode, "none")) {
+        injectFault(build_options.fault_mode);
     }
 
     com1.write("[azura] boot complete, halting\n");
+    cpu.haltForever();
+}
+
+/// The faults the kernel can inject on purpose, to exercise the exception
+/// handler.
+const FaultMode = enum {
+    /// #UD (vector 6). The vector pushes no error code.
+    invalid_opcode,
+    /// #GP (vector 13). The vector pushes an error code.
+    bad_segment,
+
+    /// Parse the value of the `fault-mode` build option.
+    fn parse(text: []const u8) ?FaultMode {
+        if (std.mem.eql(u8, text, "invalid_opcode")) return .invalid_opcode;
+        if (std.mem.eql(u8, text, "bad_segment")) return .bad_segment;
+        return null;
+    }
+};
+
+/// Raise the requested fault on purpose.
+///
+/// The handler installed above must catch it, report it and halt the
+/// machine. The code after the faulting instruction is only reached if the
+/// handler returned, which it never does; reaching it means the handler
+/// failed and is reported as a boot error.
+fn injectFault(mode_text: []const u8) noreturn {
+    const mode = FaultMode.parse(mode_text) orelse {
+        com1.print("[azura] FATAL: unknown fault mode '{s}'\n", .{mode_text});
+        cpu.haltForever();
+    };
+
+    switch (mode) {
+        .invalid_opcode => {
+            com1.write("[azura] fault injection requested, executing an invalid opcode\n");
+            asm volatile ("ud2");
+        },
+        .bad_segment => {
+            com1.write("[azura] fault injection requested, loading an out of range segment selector\n");
+            cpu.loadInvalidSegmentSelector();
+        },
+    }
+
+    com1.write("[azura] ERROR: the injected fault did not fault\n");
     cpu.haltForever();
 }
 
