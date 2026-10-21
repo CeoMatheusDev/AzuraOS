@@ -104,7 +104,7 @@ pub fn build(b: *std.Build) void {
     // Static ELF gate for the kernel artifact
     // ------------------------------------------------------------------
 
-    const elf_gate = b.addSystemCommand(&.{"bash", "tools/check-kernel-elf.sh"});
+    const elf_gate = b.addSystemCommand(&.{ "bash", "tools/check-kernel-elf.sh" });
     elf_gate.addArtifactArg(kernel);
     const elf_gate_step = b.step("kernel-elf-gate", "Validate the structure of the built kernel ELF");
     elf_gate_step.dependOn(&elf_gate.step);
@@ -184,13 +184,31 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+
+    // The exception model (the frame layout and the classification of the
+    // vectors) is pure logic too, so it is verified on the host as well.
+    //
+    // The IDT module itself cannot be: Zig 0.17 refuses to compile an
+    // inline assembly label reference in a test build, so the per-vector
+    // stubs cannot be instantiated on the host. The stub is verified in
+    // the kernel instead, by `idt.verifyEntries`, which the QEMU boot
+    // test exercises.
+    const exception_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("kernel/arch/x86_64/exception.zig"),
+            .target = host_target,
+            .optimize = .Debug,
+        }),
+    });
     const unit_test_run = b.addRunArtifact(unit_tests);
     const shared_test_run = b.addRunArtifact(shared_tests);
     const gdt_test_run = b.addRunArtifact(gdt_tests);
+    const exception_test_run = b.addRunArtifact(exception_tests);
     const unit_test_step = b.step("unit-test", "Run the host unit tests");
     unit_test_step.dependOn(&unit_test_run.step);
     unit_test_step.dependOn(&shared_test_run.step);
     unit_test_step.dependOn(&gdt_test_run.step);
+    unit_test_step.dependOn(&exception_test_run.step);
 
     const boot_test = b.addSystemCommand(&.{ "bash", "tests/boot/test-m1-boot.sh" });
     boot_test.addArg(esp_image);
