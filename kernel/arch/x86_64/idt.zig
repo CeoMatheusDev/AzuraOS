@@ -153,11 +153,15 @@ pub fn install(code_selector: u16) void {
 ///   * the direction flag must be clear. The processor does not touch it on
 ///     an exception entry, and a faulting instruction may well have set it.
 ///
-/// The stub clobbers RDI, RSI, RSP and the flags. Nothing has to be
-/// preserved, because the stub never returns: the handler halts the
-/// machine, and the context that was interrupted is never resumed. A build
-/// step that does try to resume it would have to save and restore the
-/// whole register state, and this stub would not be enough.
+/// The stub clobbers RDI, RSI, RSP and the flags, and the clobber list below
+/// names them so that the contract is machine checked rather than only
+/// described. Nothing has to be preserved, because the stub never returns:
+/// the handler halts the machine, and the context that was interrupted is
+/// never resumed. The ABI's caller saved rules are therefore not the reason
+/// the list is short — the reason is that there is no caller to return to. A
+/// build step that did try to resume the interrupted context would have to
+/// save and restore the whole register state first, and this stub would not
+/// be enough.
 fn makeStub(comptime vector: u8) usize {
     const Stub = struct {
         const vector_id: u8 = vector;
@@ -171,7 +175,7 @@ fn makeStub(comptime vector: u8) usize {
                 \\ callq azuraCommonHandler
                 :
                 : [v] "i" (vector_id),
-                : .{ .memory = true, .cc = true });
+                : .{ .memory = true, .cc = true, .rdi = true, .rsi = true, .rsp = true });
         }
     };
     return @intFromPtr(&Stub.stub);
