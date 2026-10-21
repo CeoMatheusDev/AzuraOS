@@ -24,6 +24,7 @@ const com1 = @import("com1");
 const cpu = @import("cpu.zig");
 const exception = @import("exception.zig");
 const tss = @import("tss.zig");
+const gdt = @import("gdt.zig");
 
 /// One IDT entry. 16 bytes, as required by the 64-bit IDT format.
 pub const Entry = extern struct {
@@ -299,6 +300,14 @@ export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void 
     });
     if (context.error_code) |error_code| {
         com1.print("[azura] KERNEL FAULT: error_code=0x{x}\n", .{error_code});
+    }
+    if (vector == 8) {
+        const bounds = gdt.doubleFaultStackBounds();
+        const frame_address = @intFromPtr(frame);
+        const on_ist1 = frame_address >= bounds.base and frame_address < bounds.top;
+        com1.print("[azura] DOUBLE FAULT: frame=0x{x} IST1=[0x{x},0x{x}) active={s}\n", .{
+            frame_address, bounds.base, bounds.top, if (on_ist1) "yes" else "no",
+        });
     }
     com1.write("[azura] KERNEL FAULT: machine halted\n");
     cpu.haltForever();
