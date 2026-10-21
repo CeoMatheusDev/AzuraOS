@@ -98,7 +98,7 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     // handler instead of escalating to a triple fault, which would reboot
     // the machine with no diagnostic at all.
     const initial_selector = cpu.codeSelector();
-    idt.install(initial_selector);
+    idt.install(initial_selector, false);
     com1.print("[azura] IDT installed, provisional selector 0x{x}\n", .{initial_selector});
 
     // Install the GDT the kernel owns. Until now the kernel was running on
@@ -118,7 +118,7 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
 
     // The handlers now run in the kernel's own code segment, so the IDT has
     // to name that selector.
-    idt.install(gdt.kernel_code_selector);
+    idt.install(gdt.kernel_code_selector, true);
 
     // Check that every entry really points at the beginning of its stub.
     if (idt.verifyEntries()) |vector| {
