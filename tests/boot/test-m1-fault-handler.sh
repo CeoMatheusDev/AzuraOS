@@ -86,6 +86,17 @@ run_fault() {
     failures=$((failures + 1))
   fi
 
+  # Fault injection is permitted only after the TSS and the final IDT
+  # configuration are installed. Assert the complete transition happened.
+  if ! grep -q -F "[azura] TSS task register loaded (TR=0x18)" "$serial_log"; then
+    echo "FAIL ($mode): the kernel did not confirm the task register" >&2
+    failures=$((failures + 1))
+  fi
+  if ! grep -q -F "[azura] double-fault gate: IST1 configured" "$serial_log"; then
+    echo "FAIL ($mode): the kernel did not confirm the IST1 gate" >&2
+    failures=$((failures + 1))
+  fi
+
   # The fault is injected after the handover, so the boot services must be
   # gone and the post-ExitBootServices checks must have passed. Without this
   # the exception could be reported by a kernel that never took the machine.
