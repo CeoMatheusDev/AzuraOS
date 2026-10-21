@@ -15,6 +15,12 @@
 //! still reported, and once with the kernel's own code selector after the
 //! switch. See `install`.
 //!
+//! Critical exceptions (`#NMI`, `#DF`, `#MC`) run on the IST stack after the
+//! TSS is loaded; `ist.zig` holds the policy and the boot test proves that
+//! the processor really switches stacks. The first installation uses IST 0
+//! on purpose: the kernel's TSS is not loaded yet, and the firmware's TSS
+//! must not be trusted with a gate that names an IST the kernel does not own.
+//!
 //! The frame layout and the classification of the vectors are in
 //! `exception.zig`, which holds no inline assembly and is verified by the
 //! host unit tests. The part of this module that touches the processor is
@@ -23,6 +29,7 @@
 const com1 = @import("com1");
 const cpu = @import("cpu.zig");
 const exception = @import("exception.zig");
+const ist = @import("ist.zig");
 
 /// One IDT entry. 16 bytes, as required by the 64-bit IDT format.
 pub const Entry = extern struct {
@@ -87,10 +94,16 @@ var handler_address: usize = 0;
 /// It must be a selector of the GDT that is currently installed; after the
 /// kernel installs its own GDT that is `gdt.kernel_code_selector`.
 ///
+/// `use_ist` selects whether the critical vectors name IST1. It must be
+/// false until the kernel's TSS is loaded: before `ltr`, the task register
+/// still names the firmware's TSS (or none), and a gate that asks for an IST
+/// the current TSS does not define would load a wild stack pointer exactly
+/// when the machine is already failing.
+///
 /// Must be called with interrupts disabled. After this call every CPU
 /// exception lands in `commonHandler` instead of escalating to a triple
 /// fault.
-pub fn install(code_selector: u16) void {
+pub fn install(code_selector: u16, use_ist: bool) void {
     handler_address = @intFromPtr(&azuraCommonHandler);
 
     inline for (0..exception_vector_count) |vector| {
@@ -98,7 +111,7 @@ pub fn install(code_selector: u16) void {
         table[vector] = .{
             .offset_low = @truncate(stub),
             .selector = code_selector,
-            .ist = 0,
+            .ist = if (use_ist) ist.number(vector) else 0,
             .type_attr = gate_type,
             .offset_middle = @truncate(stub >> 16),
             .offset_high = @truncate(stub >> 32),
@@ -256,6 +269,23 @@ pub fn verifyEntries() ?u8 {
     return null;
 }
 
+/// Verify that every exception gate names the IST stack the policy requires.
+///
+/// Only meaningful after `install(..., true)`. The kernel calls it right
+/// after the final installation, so a table whose critical gates would run
+/// on the interrupted stack is refused at boot instead of at the first
+/// double fault.
+///
+/// Returns the vector of the first entry that is wrong, or null when every
+/// entry matches `ist.number`.
+pub fn verifyIst() ?u8 {
+    var vector: u16 = 0;
+    while (vector < exception_vector_count) : (vector += 1) {
+        if (table[vector].ist != ist.number(@intCast(vector))) return @intCast(vector);
+    }
+    return null;
+}
+
 /// Common exception handler. Never returns: the machine is halted so the
 /// failure is visible in the serial log instead of restarting the boot.
 ///
@@ -265,6 +295,10 @@ pub fn verifyEntries() ?u8 {
 /// pointer 16 byte aligned and the direction flag clear. See `makeStub`.
 export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void {
     const context = exception.decodeFrame(vector, frame);
+    // The address of a local is on the stack the handler is actually using.
+    // It is logged so the tests can prove that #DF/#NMI/#MC switched to the
+    // IST stack, while ordinary faults stayed on the interrupted stack.
+    var stack_probe: u8 = 0;
     com1.print("[azura] KERNEL FAULT: vector {d} ({s})\n", .{
         vector,
         exception.vectorName(vector),
@@ -277,6 +311,7 @@ export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void 
     if (context.error_code) |error_code| {
         com1.print("[azura] KERNEL FAULT: error_code=0x{x}\n", .{error_code});
     }
+    com1.print("[azura] KERNEL FAULT: handler stack=0x{x}\n", .{@intFromPtr(&stack_probe)});
     com1.write("[azura] KERNEL FAULT: machine halted\n");
     cpu.haltForever();
 }

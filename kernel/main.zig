@@ -4,11 +4,12 @@
 //! The bootloader jumps here with RDI pointing at the `boot_info` structure
 //! described in shared/boot_info.zig, after it has called ExitBootServices.
 //!
-//! Scope of this milestone (M2.2):
+//! Scope of this milestone (M2.2b):
 //!   * validate the boot protocol contract,
 //!   * prove that the boot services are gone and that the environment they
 //!     left behind (stack, GDT, IDT, framebuffer, memory map) is still valid,
 //!   * install the IDT so CPU faults are reported instead of rebooting,
+//!   * install a TSS whose IST1 stack takes over on #NMI, #DF and #MC,
 //!   * stop the machine in a controlled way.
 //!
 //! NOT in this milestone: the kernel's own page tables (M2.4), the physical
@@ -23,6 +24,7 @@ const build_options = @import("build_options");
 const cpu = @import("arch/x86_64/cpu.zig");
 const gdt = @import("arch/x86_64/gdt.zig");
 const idt = @import("arch/x86_64/idt.zig");
+const tss = @import("arch/x86_64/tss.zig");
 
 /// Number of memory map entries printed in the boot log.
 const memory_map_preview = 8;
@@ -42,7 +44,7 @@ const stack_probe_pattern: u64 = 0x5a17_c0de_1234_5678;
 ///   * the CPU is in 64-bit long mode with interrupts disabled.
 pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     com1.init();
-    com1.write("[azura] === AzuraOS kernel v0.1.0 (M2.2) ===\n");
+    com1.write("[azura] === AzuraOS kernel v0.1.0 (M2.2b) ===\n");
 
     if (boot_info.magic != shared.magic) {
         com1.print("[azura] FATAL: bad boot magic 0x{x}\n", .{boot_info.magic});
@@ -96,25 +98,51 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     // The IDT is installed first, with the selector that is active at this
     // moment. That way a fault during the GDT switch is reported by the
     // handler instead of escalating to a triple fault, which would reboot
-    // the machine with no diagnostic at all.
+    // the machine with no diagnostic at all. The critical gates stay on the
+    // interrupted stack: the kernel's TSS is not loaded yet.
     const initial_selector = cpu.codeSelector();
-    idt.install(initial_selector);
+    idt.install(initial_selector, false);
     com1.print("[azura] IDT installed, provisional selector 0x{x}\n", .{initial_selector});
+
+    // The TSS has to exist before the GDT, because the GDT carries its
+    // descriptor. The IST stack is probed now, while a failure is still a
+    // boot error and not a fault during a fault.
+    tss.init(boot_info.stack_top);
+    printTss(boot_info);
+    if (tss.probeStack()) |address| {
+        com1.print("[azura] IST1 stack: writable at 0x{x}\n", .{address});
+    } else {
+        com1.write("[azura] FATAL: the IST1 stack is not writable\n");
+        cpu.haltForever();
+    }
 
     // Install the GDT the kernel owns. Until now the kernel was running on
     // the GDT the firmware built, which only worked by accident.
-    gdt.init();
+    gdt.init(tss.encodeDescriptor(tss.address(), tss.limit()));
     printGdt();
 
+    // Load the task register and prove that the processor really uses the
+    // TSS the kernel built. `ltr` itself faults if the descriptor is not a
+    // present TSS, so this also validates the GDT entry with the processor's
+    // own checks.
+    tss.load();
+    verifyTss();
+
     // The handlers now run in the kernel's own code segment, so the IDT has
-    // to name that selector.
-    idt.install(gdt.kernel_code_selector);
+    // to name that selector. The TSS is loaded, so the critical vectors can
+    // name IST1 from now on.
+    idt.install(gdt.kernel_code_selector, true);
 
     // Check that every entry really points at the beginning of its stub.
     if (idt.verifyEntries()) |vector| {
         com1.print("[azura] FATAL: IDT entry for vector {d} does not point at its stub\n", .{vector});
         cpu.haltForever();
     }
+    if (idt.verifyIst()) |vector| {
+        com1.print("[azura] FATAL: IDT entry for vector {d} does not use the required IST stack\n", .{vector});
+        cpu.haltForever();
+    }
+    com1.write("[azura] IDT: IST 1 active for vectors 2, 8 and 18\n");
     com1.write("[azura] IDT installed, exception handling active\n");
 
     // Prove that the environment the firmware left behind is still usable
@@ -124,7 +152,7 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     // and the framebuffer are readable.
     verifyStack(boot_info);
     verifyIdt();
-    com1.write("[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok framebuffer=ok memory_map=ok\n");
+    com1.write("[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok framebuffer=ok memory_map=ok\n");
 
     if (build_options.fault_mode.len != 0 and !std.mem.eql(u8, build_options.fault_mode, "none")) {
         injectFault(build_options.fault_mode);
@@ -141,11 +169,15 @@ const FaultMode = enum {
     invalid_opcode,
     /// #GP (vector 13). The vector pushes an error code.
     bad_segment,
+    /// #DF (vector 8), forced by hiding the #GP gate from the IDT. The
+    /// vector uses IST1, so the handler must run on the alternate stack.
+    double_fault,
 
     /// Parse the value of the `fault-mode` build option.
     fn parse(text: []const u8) ?FaultMode {
         if (std.mem.eql(u8, text, "invalid_opcode")) return .invalid_opcode;
         if (std.mem.eql(u8, text, "bad_segment")) return .bad_segment;
+        if (std.mem.eql(u8, text, "double_fault")) return .double_fault;
         return null;
     }
 };
@@ -171,10 +203,112 @@ fn injectFault(mode_text: []const u8) noreturn {
             com1.write("[azura] fault injection requested, loading an out of range segment selector\n");
             cpu.loadInvalidSegmentSelector();
         },
+        .double_fault => {
+            com1.write("[azura] fault injection requested, hiding vector 13 to force a double fault\n");
+            // Keep vectors 0..8 visible and hide the rest. `int $13` then
+            // finds the #GP gate outside the IDT limit; the delivery of the
+            // #GP fails for the same reason and the processor escalates to
+            // #DF. Vector 8 is inside the limit and names IST1, so the
+            // handler runs on the alternate stack.
+            var descriptor = idt.readInstalledDescriptor();
+            descriptor.limit = 9 * @sizeOf(idt.Entry) - 1;
+            cpu.loadIdt(&descriptor);
+            asm volatile ("int $13");
+        },
     }
 
     com1.write("[azura] ERROR: the injected fault did not fault\n");
     cpu.haltForever();
+}
+
+/// Print the TSS state and refuse impossible values before the processor is
+/// allowed to depend on it.
+fn printTss(boot_info: *shared.boot_info) void {
+    const state = tss.state();
+
+    com1.print("[azura] TSS: selector=0x{x} base=0x{x} limit={d}\n", .{
+        tss.selector,
+        tss.address(),
+        tss.limit(),
+    });
+    com1.print("[azura] TSS: rsp0=0x{x} ist1=0x{x} iomap_base={d}\n", .{
+        state.rsp0,
+        state.ist1,
+        state.iomap_base,
+    });
+    com1.print("[azura] IST1 stack: base=0x{x} top=0x{x}\n", .{
+        tss.stackBase(),
+        tss.stackTop(),
+    });
+
+    if (state.rsp0 != boot_info.stack_top) {
+        com1.print("[azura] FATAL: TSS rsp0 0x{x} is not the boot stack top 0x{x}\n", .{
+            state.rsp0,
+            boot_info.stack_top,
+        });
+        cpu.haltForever();
+    }
+    if (state.ist1 != tss.stackTop()) {
+        com1.print("[azura] FATAL: TSS IST1 0x{x} is not the top of the alternate stack 0x{x}\n", .{
+            state.ist1,
+            tss.stackTop(),
+        });
+        cpu.haltForever();
+    }
+    // A base at or below the limit would make the processor read an I/O
+    // permission bitmap out of the TSS itself.
+    if (state.iomap_base != tss.size) {
+        com1.print("[azura] FATAL: TSS I/O map base {d} is not the disabled value {d}\n", .{
+            state.iomap_base,
+            tss.size,
+        });
+        cpu.haltForever();
+    }
+}
+
+/// Prove that the processor loaded the TSS the kernel built.
+///
+/// `ltr` would have faulted on an invalid descriptor; this check closes the
+/// remaining gap, where the descriptor is valid but points at another object
+/// or at a stale address.
+fn verifyTss() void {
+    const task_register = cpu.taskRegister();
+    com1.print("[azura] TSS loaded, task register=0x{x}\n", .{task_register});
+    if (task_register != tss.selector) {
+        com1.print("[azura] FATAL: TR is 0x{x}, expected 0x{x}\n", .{ task_register, tss.selector });
+        cpu.haltForever();
+    }
+
+    const descriptor = gdt.readSystemDescriptor(tss.selector) orelse {
+        com1.write("[azura] FATAL: the TSS descriptor does not fit the GDT\n");
+        cpu.haltForever();
+    };
+    const decoded = tss.decodeDescriptor(descriptor);
+    com1.print("[azura] TSS descriptor: base=0x{x} limit={d} access=0x{x} flags=0x{x}\n", .{
+        decoded.base,
+        decoded.limit,
+        decoded.access,
+        decoded.flags,
+    });
+
+    // `ltr` marks the descriptor busy (type 9 -> type 11), so the access
+    // byte must have changed from the value the kernel encoded. Checking for
+    // the busy type proves both that the descriptor describes our TSS and
+    // that the processor accepted it.
+    const busy_tss: u8 = 0x8b; // present, DPL 0, system, busy 64-bit TSS
+    if (decoded.base != tss.address() or decoded.limit != tss.limit() or decoded.access != busy_tss) {
+        com1.write("[azura] FATAL: the TSS descriptor in the GDT does not describe the kernel TSS\n");
+        cpu.haltForever();
+    }
+
+    const state = tss.state();
+    if (state.ist1 != tss.stackTop()) {
+        com1.print("[azura] FATAL: the loaded TSS has IST1=0x{x}, expected 0x{x}\n", .{
+            state.ist1,
+            tss.stackTop(),
+        });
+        cpu.haltForever();
+    }
 }
 
 /// Print the GDT the kernel just installed, and prove that it is the one

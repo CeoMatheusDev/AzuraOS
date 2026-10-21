@@ -71,7 +71,7 @@ expected=(
   "[azura] framebuffer:"
   "[azura] GDT active, the segments are the kernel's own"
   "[azura] IDT installed, exception handling active"
-  "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok framebuffer=ok memory_map=ok"
+  "[azura] post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok framebuffer=ok memory_map=ok"
   "[azura] boot complete, halting"
 )
 

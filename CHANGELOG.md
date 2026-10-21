@@ -63,6 +63,26 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
   boot services quarantine and the kernel image range.
 - `docs/testing/m2.2-exitbootservices-evidence.md`: the measured evidence
   of the normal boot, the stale key retry and the fault path.
+- `kernel/arch/x86_64/tss.zig`: the 64-bit TSS (104 bytes), the 16 KiB IST1
+  stack, the system descriptor encoder/decoder and the stack probe. The TSS
+  layout and the descriptor round trip are covered by host unit tests.
+- `kernel/arch/x86_64/ist.zig`: the IST policy — `#NMI`, `#DF` and `#MC` use
+  stack 1, every other vector keeps IST 0 — with host unit tests.
+- `kernel/arch/x86_64/cpu.zig`: `loadTaskRegister` and `taskRegister`, which
+  load and read back the TSS selector.
+- `kernel/arch/x86_64/gdt.zig`: the 16 byte TSS descriptor at selector 0x18
+  (indices 3 and 4), a collision check against the firmware selector alias,
+  and `readSystemDescriptor` for the boot verification.
+- `kernel/arch/x86_64/idt.zig`: the IST field of the exception gates, set
+  after the TSS is loaded, plus `verifyIst` and the handler stack in the fault
+  report.
+- `tests/boot/test-m2.2b-double-fault.sh` and the `-Dfault-mode=double_fault`
+  build option: the test hides the #GP gate from the IDT, which makes the
+  processor escalate to a real #DF, and asserts that the handler ran on the
+  IST stack and outside the interrupted stack.
+- `docs/adr/ADR-0008-tss-and-ist.md`, `docs/specs/m2.2b-tss-ist.md` and
+  `docs/testing/m2.2b-tss-ist-evidence.md`: the decision, the acceptance
+  criteria and the measured evidence of the alternate stack.
 
 ### Changed
 
@@ -102,6 +122,15 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
 - The license is decided: `README.md`, `CONTRIBUTING.md` and `AGENTS.md`
   state the Apache-2.0 license and the contribution and dependency policy
   instead of describing the choice as pending.
+- The IDT is installed twice with different IST settings: the provisional
+  installation uses the firmware selector and IST 0 (the kernel TSS is not
+  loaded yet), and the final one uses the kernel selector and IST 1 for the
+  critical vectors after `LTR 0x18`.
+- The post-`ExitBootServices` summary now includes `tss=ok` and `ist=ok`, and
+  the fault report logs the stack the handler is actually using.
+- The boot chain installs the GDT with the TSS descriptor before loading the
+  task register, and refuses to boot if the firmware selector would collide
+  with the descriptor's two slots.
 
 ### Fixed
 

@@ -7,6 +7,7 @@
 //!   selector 0x00  null
 //!   selector 0x08  kernel code (long mode, base 0, limit 4 GiB)
 //!   selector 0x10  kernel data (base 0, limit 4 GiB)
+//!   selector 0x18  TSS (two slots: 0x18 and 0x20)
 //!
 //! Both segments have base 0, so the flat memory layout the kernel was
 //! linked for is preserved.
@@ -16,6 +17,8 @@
 //!   * after `init` the CS register holds `kernel_code_selector`,
 //!   * the IDT must be (re)installed with `kernel_code_selector` afterwards,
 //!     because an IDT entry names the code segment the handler runs in.
+//!   * the TSS descriptor, when present, occupies indices 3 and 4; the
+//!     firmware code selector alias may not land on either of them.
 
 const std = @import("std");
 const com1 = @import("com1");
@@ -37,7 +40,12 @@ pub const kernel_data_selector: u16 = 0x10;
 ///   bits 48-51  limit, bits 16-19
 ///   bits 52-55  flags (G, D/B, L, AVL)
 ///   bits 56-63  base, bits 24-31
-pub const Entry = extern struct {
+///
+/// The struct is packed because the TSS descriptor is stored as two `u64`
+/// words: a packed struct can be cast to and from the integer with
+/// `@bitCast`, an extern struct cannot. Every field is byte aligned, so the
+/// packing does not change the layout.
+pub const Entry = packed struct {
     limit_low: u16,
     base_low: u16,
     base_middle: u8,
@@ -107,7 +115,8 @@ const entry_count = 16;
 ///   0x00  null
 ///   0x08  kernel code (long mode, base 0, limit 4 GiB)
 ///   0x10  kernel data (base 0, limit 4 GiB)
-///   0x18  free, reserved for the TSS
+///   0x18  TSS, bytes 0-7 (see `tss.zig` and `init`)
+///   0x20  TSS, bytes 8-15
 ///   ...   a copy of the kernel code segment at the selector the firmware
 ///         was using, so an IDT installed before the switch stays valid
 ///         during the transition
@@ -117,6 +126,11 @@ var pseudo_descriptor: PseudoDescriptor = .{ .limit = 0, .base = 0 };
 
 /// Install the GDT and switch the processor to it.
 ///
+/// `system_descriptor` is the already encoded 16 byte TSS descriptor (see
+/// `tss.encodeDescriptor`), or null when the kernel runs without a TSS. The
+/// kernel passes one so the processor can use the IST stacks; the unit tests
+/// do not need a TSS.
+///
 /// After this call the CS register holds `kernel_code_selector` and the data
 /// segment registers hold `kernel_data_selector`.
 ///
@@ -124,7 +138,7 @@ var pseudo_descriptor: PseudoDescriptor = .{ .limit = 0, .base = 0 };
 /// segment. The IDT installed before the switch names that selector, and a
 /// fault taken between the two operations would otherwise raise a general
 /// protection fault whose handler would raise it again, in a loop.
-pub fn init() void {
+pub fn init(system_descriptor: ?[2]u64) void {
     const previous_selector = cpu.codeSelector();
     const previous_index = previous_selector >> 3;
 
@@ -135,11 +149,23 @@ pub fn init() void {
     table[1] = Entry.longCode();
     table[2] = Entry.data();
 
+    if (system_descriptor) |descriptor| {
+        table[3] = @bitCast(descriptor[0]);
+        table[4] = @bitCast(descriptor[1]);
+    }
+
     if (previous_index != 1 and previous_index != 2) {
         if (previous_index >= entry_count) {
             // The firmware uses a selector the table cannot hold. The
             // transition would be unsafe, so the kernel refuses to continue.
             com1.print("[azura] FATAL: firmware code selector 0x{x} does not fit the GDT\n", .{previous_selector});
+            cpu.haltForever();
+        }
+        // The TSS descriptor is 16 bytes wide. Overwriting one of its two
+        // slots with the transition alias would leave a half valid TSS in
+        // the table and `ltr` would fault later with a much worse message.
+        if (system_descriptor != null and (previous_index == 3 or previous_index == 4)) {
+            com1.print("[azura] FATAL: firmware code selector 0x{x} collides with the TSS descriptor\n", .{previous_selector});
             cpu.haltForever();
         }
         table[previous_index] = Entry.longCode();
@@ -207,6 +233,20 @@ pub fn baseAddress() u64 {
 /// Limit of the GDT.
 pub fn limit() u16 {
     return @sizeOf(@TypeOf(table)) - 1;
+}
+
+/// Read the 16 byte system descriptor at `selector` back from the table.
+///
+/// A TSS descriptor occupies two GDT slots. Returning both words lets the
+/// kernel decode it with `tss.decodeDescriptor` and prove that the bytes the
+/// processor will read are the bytes the kernel wrote, before `ltr` is
+/// executed.
+///
+/// Returns null when the selector does not leave room for a second slot.
+pub fn readSystemDescriptor(selector: u16) ?[2]u64 {
+    const index: usize = selector >> 3;
+    if (index + 1 >= entry_count) return null;
+    return .{ @bitCast(table[index]), @bitCast(table[index + 1]) };
 }
 
 // --- Unit tests -------------------------------------------------------------

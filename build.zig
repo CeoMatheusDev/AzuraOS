@@ -81,10 +81,12 @@ pub fn build(b: *std.Build) void {
     //   none             the kernel does not inject anything
     //   invalid_opcode   #UD (vector 6), which pushes no error code
     //   bad_segment      #GP (vector 13), which pushes an error code
+    //   double_fault     #DF (vector 8), forced through a failed #GP delivery
     //
-    // The two vectors have different exception frame shapes, so both are
-    // needed to cover the frame decoding.
-    const fault_mode = b.option([]const u8, "fault-mode", "Which fault the kernel injects: none, invalid_opcode or bad_segment") orelse "none";
+    // The first two vectors have different exception frame shapes, so both
+    // are needed to cover the frame decoding. The double fault also proves
+    // that the processor switched to the IST stack.
+    const fault_mode = b.option([]const u8, "fault-mode", "Which fault the kernel injects: none, invalid_opcode, bad_segment or double_fault") orelse "none";
 
     const kernel_options = b.addOptions();
     kernel_options.addOption([]const u8, "fault_mode", fault_mode);
@@ -219,15 +221,39 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
+
+    // The TSS layout, the system descriptor encoding and the IST stack probe
+    // are pure logic besides `ltr`/`str`, which the boot test exercises.
+    const tss_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("kernel/arch/x86_64/tss.zig"),
+            .target = host_target,
+            .optimize = .Debug,
+        }),
+    });
+
+    // The IST policy is pure logic and is shared by the IDT and the boot
+    // checks, so it is verified on the host as well.
+    const ist_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("kernel/arch/x86_64/ist.zig"),
+            .target = host_target,
+            .optimize = .Debug,
+        }),
+    });
     const unit_test_run = b.addRunArtifact(unit_tests);
     const shared_test_run = b.addRunArtifact(shared_tests);
     const gdt_test_run = b.addRunArtifact(gdt_tests);
     const exception_test_run = b.addRunArtifact(exception_tests);
+    const tss_test_run = b.addRunArtifact(tss_tests);
+    const ist_test_run = b.addRunArtifact(ist_tests);
     const unit_test_step = b.step("unit-test", "Run the host unit tests");
     unit_test_step.dependOn(&unit_test_run.step);
     unit_test_step.dependOn(&shared_test_run.step);
     unit_test_step.dependOn(&gdt_test_run.step);
     unit_test_step.dependOn(&exception_test_run.step);
+    unit_test_step.dependOn(&tss_test_run.step);
+    unit_test_step.dependOn(&ist_test_run.step);
 
     const boot_test = b.addSystemCommand(&.{ "bash", "tests/boot/test-m1-boot.sh" });
     boot_test.addArg(esp_image);
@@ -246,9 +272,15 @@ pub fn build(b: *std.Build) void {
     const ebs_retry_test_step = b.step("ebs-retry-test", "Run the ExitBootServices stale key retry test in QEMU");
     ebs_retry_test_step.dependOn(&ebs_retry_test.step);
 
-    const test_step = b.step("test", "Run every test: unit tests, boot test, fault handler test and the ExitBootServices retry test");
+    const double_fault_test = b.addSystemCommand(&.{ "bash", "tests/boot/test-m2.2b-double-fault.sh" });
+    double_fault_test.has_side_effects = true;
+    const double_fault_test_step = b.step("double-fault-test", "Run the double fault IST test in QEMU");
+    double_fault_test_step.dependOn(&double_fault_test.step);
+
+    const test_step = b.step("test", "Run every test: unit tests, boot test, fault handler test, the ExitBootServices retry test and the double fault test");
     test_step.dependOn(unit_test_step);
     test_step.dependOn(boot_test_step);
     test_step.dependOn(&fault_test.step);
     test_step.dependOn(&ebs_retry_test.step);
+    test_step.dependOn(&double_fault_test.step);
 }
