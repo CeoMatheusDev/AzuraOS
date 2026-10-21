@@ -96,7 +96,7 @@ pub fn firmwareSelectorCompatible(firmware_cs: u16) bool {
 pub fn validIstStack(base: u64, top: u64) bool {
     if (base == 0 or top <= base or top - base < 4096) return false;
     if ((top & 15) != 0) return false;
-    return canonical48(base) and canonical48(top - 1) and
+    return canonical48(base) and canonical48(top) and canonical48(top - 1) and
         ((base >> 47) & 1) == (((top - 1) >> 47) & 1);
 }
 
@@ -133,5 +133,7 @@ test "IST stack boundaries reject invalid ranges" {
     try std.testing.expect(!validIstStack(0x100000, 0x0001_0000_0000_0000));
     try std.testing.expect(!validIstStack(0x0000_7fff_ffff_f000, 0x0000_8000_0000_1000));
     try std.testing.expect(!validIstStack(0x0000_8000_0000_0000, 0x0000_8000_0000_2000));
+    // The exclusive end is loaded into RSP and must itself be canonical.
+    try std.testing.expect(!validIstStack(0x0000_7fff_ffff_c000, 0x0000_8000_0000_0000));
     try std.testing.expect(validIstStack(0xffff_8000_0000_0000, 0xffff_8000_0000_4000));
 }
