@@ -106,6 +106,16 @@ pub export fn azura_kernel_entry(boot_info: *shared.boot_info) noreturn {
     gdt.init();
     printGdt();
 
+    // Only load TR after confirming the kernel GDT and CS are active.
+    // A failed LTR can raise #GP; keep the provisional IDT installed here.
+    gdt.loadTaskRegister();
+    const active_tr = gdt.readTaskRegister();
+    if (active_tr != 0x18) {
+        com1.print("[azura] FATAL: TR is 0x{x}, expected 0x18\n", .{active_tr});
+        cpu.haltForever();
+    }
+    com1.write("[azura] TSS task register loaded (TR=0x18)\n");
+
     // The handlers now run in the kernel's own code segment, so the IDT has
     // to name that selector.
     idt.install(gdt.kernel_code_selector);
