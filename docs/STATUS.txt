@@ -3,19 +3,22 @@ Data UTC: 2026-10-21 (data da atualização; hora não aferida)
 Projeto: AzuraOS
 Versão planejada: 0.1.0 (marco interno M0+M1); versão/tag publicada: nenhuma
 Arquitetura: x86_64 / UEFI; AArch64 e RISC-V futuros, não suportados
-Branch: main; M2.2 integrado em 02e5f3d (PR #2); CI verde no run 39542990749
+Branch: feat/m2.2b-tss-ist (M2.2b); main em ecf4131 (registro do merge M2.2)
          origin = https://github.com/CeoMatheusDev/AzuraOS.git
 Último commit verificado em main: 02e5f3d "Merge pull request #2 from
                           CeoMatheusDev/feat/m2-exit-boot-services";
-                          CI verde no run 39542990749
+                          CI verde no run 39542990749. O commit ecf4131
+                          (docs) também tem CI verde, no run 39543328796.
 Última tag publicada: nenhuma
 Zig version: 0.17.0 VERIFICADA no Fedora 44 (zig version -> 0.17.0)
 QEMU: 10.2.2 VERIFICADO; OVMF: edk2-ovmf-20260812 VERIFICADO
 Estado geral: M1 CONCLUÍDO; M2.1 (GDT própria) CONCLUÍDO e integrado em main
-              (PR #1, merge 1e87504); M2.2 (ExitBootServices) IMPLEMENTADO na
-              branch, aguardando merge. Evidência M1:
+              (PR #1, merge 1e87504); M2.2 (ExitBootServices) CONCLUÍDO e
+              integrado em main (PR #2, merge 02e5f3d); M2.2b (TSS/IST)
+              IMPLEMENTADO na branch. Evidência M1:
               docs/testing/m1-boot-evidence.md; evidência M2.2:
-              docs/testing/m2.2-exitbootservices-evidence.md
+              docs/testing/m2.2-exitbootservices-evidence.md; evidência M2.2b:
+              docs/testing/m2.2b-tss-ist-evidence.md
 
 OBJETIVO DA TAREFA
 M0.1: estabelecer requisitos de toolchain, estratégia de build reproduzível e inventário Fedora.
@@ -23,8 +26,8 @@ M0.1: estabelecer requisitos de toolchain, estratégia de build reproduzível e 
 ESTADO ATUAL (resumo; o registro cronológico completo está abaixo)
 Implementado e VERIFICADO em QEMU/OVMF: bootloader UEFI, kernel freestanding,
 protocolo de boot v2, driver serial, splash no framebuffer, GDT e IDT próprias,
-ExitBootServices com retry de chave, imagem ESP, testes automatizados de boot,
-de falha e de retry.
+ExitBootServices com retry de chave, TSS com pilha IST para #NMI/#DF/#MC,
+imagem ESP, testes automatizados de boot, de falha e de retry.
 Implementado e verificado: docs/TOOLCHAIN.md, tools/check-toolchain.sh.
 Não iniciado: M2.3 (alocador físico), M2.4 (paginação própria), M2.5 (heap),
 M2.6+ (timer, drivers), M3 (processos, escalonador, syscalls, IPC) e os demais
@@ -642,17 +645,71 @@ MERGE
   Framebuffer checksum igual antes e depois: 0xd43a1e5ec0808a0d.
   CR3 herdado do firmware: 0x1f401000 (as page tables próprias são M2.4).
 
+================================================================================
+2026-10-21 — M2.2b TSS e IST
+================================================================================
+
+ESCOPO
+  O kernel instala um TSS de 104 bytes e uma pilha IST1 de 16 KiB. #NMI (2),
+  #DF (8) e #MC (18) passam a usar a pilha alternativa; os demais vetores
+  continuam na pilha interrompida.
+
+DECISÕES
+  - TSS no seletor 0x18 (índices 3 e 4 da GDT), limite 103, access 0x89.
+    LTR marca o descritor como busy (0x8b) e o boot verifica o valor lido.
+  - rsp0 = topo da pilha de boot (não há ring 3); ist1 = topo da pilha
+    alternativa; iomap_base = 104 (sem bitmap de I/O).
+  - Ordem: IDT provisória com IST 0 -> TSS/IST -> GDT com o descritor ->
+    LTR/verificação -> IDT final com IST 1 -> verificação dos gates.
+  - A IDT provisória não pode nomear IST1: o TSS do kernel ainda não está
+    carregado, então o processador leria o IST do TSS do firmware.
+  - O descritor tem 16 bytes; se o seletor de código do firmware usar o
+    índice 3 ou 4, o kernel recusa iniciar em vez de sobrescrever metade
+    dele com o alias de transição.
+  - O teste de dupla falta esconde o gate do #GP (limite 143, vetores 0..8
+    visíveis), executa int $13 e deixa a entrega do #GP falhar; o processador
+    escala para #DF no vetor 8, que usa IST1.
+  - ADR-0008 e docs/specs/m2.2b-tss-ist.md registram a decisão e os critérios.
+
+VALIDAÇÃO LOCAL (QEMU/OVMF, Fedora 44, Zig 0.17.0)
+  zig fmt --check build.zig boot kernel shared tools -> PASS
+  zig build                                           -> PASS
+  zig build unit-test                                 -> PASS
+  zig build boot-test                                 -> PASS
+  zig build fault-test                                -> PASS
+  zig build ebs-retry-test                            -> PASS
+  zig build double-fault-test                         -> PASS
+
+  Boot normal:
+    TSS: selector=0x18 base=0x1066a0 limit=103
+    TSS: rsp0=0x1e010018 ist1=0x10b790 iomap_base=104
+    IST1 stack: base=0x107790 top=0x10b790
+    TSS loaded, task register=0x18
+    TSS descriptor: base=0x1066a0 limit=103 access=0x8b flags=0x0
+    IDT: IST 1 active for vectors 2, 8 and 18
+    post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok
+                            framebuffer=ok memory_map=ok
+
+  Dupla falta (build -Dfault-mode=double_fault):
+    IST:     0x1077d0..0x10b7d0
+    handler: 0x10b767 (dentro da IST; fora da pilha 0x1e00c018..0x1e010018)
+    vetor 8, error_code=0x0, cs=0x8, uma única inicialização do firmware
+
+  Evidência medida: docs/testing/m2.2b-tss-ist-evidence.md
+
 LIMITAÇÕES / RISCOS
   - Testado apenas em QEMU/OVMF; nenhum hardware físico foi exercitado.
   - As page tables ainda são as do firmware; o kernel só as lê e registra.
   - O mapa é pré-EBS; boot_services não é alocado até o M2.3.
   - A imagem do kernel continua marcada como conventional no mapa. O range é
     reservado pelo protocolo e o M2.3 precisa subtraí-lo antes de alocar.
-  - Sem TSS/IST: uma falha na pilha do kernel ainda não tem pilha alternativa.
-  - O caminho de retry é exercitado por injeção (-Dstale-map-key=true), não
-    por uma condição espontânea do firmware.
+  - O handler de #NMI/#DF/#MC ainda halta a máquina; não há recuperação.
+  - rsp0 aponta para a pilha de boot; não há ring 3 nem pilha por tarefa.
+  - O teste de dupla falta é injetado, não uma falha espontânea.
+  - O caminho de retry do ExitBootServices é exercitado por injeção
+    (-Dstale-map-key=true), não por uma condição espontânea do firmware.
 
 PRÓXIMOS PASSOS
-  1. M2.2b: TSS com IST para #DF, NMI e #MC, com teste de dupla falta.
+  1. Publicar a branch M2.2b e abrir o PR com a CI verde.
   2. M2.3 (alocador físico) aplicando o ADR-0007.
   3. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.

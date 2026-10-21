@@ -144,7 +144,8 @@ instead, which is how the misreading was detected.
   instruction needs a different design, and this ADR does not cover it.
 * The IST field of the IDT is still zero and there is still no TSS, so a
   fault that happens while the kernel stack cannot be written down is
-  still fatal. See ADR-0004.
+  still fatal. See ADR-0004. *(Updated by ADR-0008: M2.2b installs a TSS
+  and routes `#NMI`, `#DF` and `#MC` to IST1.)*
 
 ## References
 

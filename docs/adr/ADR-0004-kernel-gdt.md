@@ -31,7 +31,8 @@ The kernel installs a GDT with this layout:
 | 0x00 | 0 | null |
 | 0x08 | 1 | kernel code: long mode, base 0, limit 4 GiB |
 | 0x10 | 2 | kernel data: base 0, limit 4 GiB |
-| 0x18 | 3 | free, reserved for the TSS |
+| 0x18 | 3 | TSS descriptor, bytes 0-7 (see ADR-0008) |
+| 0x20 | 4 | TSS descriptor, bytes 8-15 |
 | 0x38 | 7 | a copy of the kernel code segment, see below |
 
 The table is 16 entries long, so the GDTR limit is 127.
@@ -109,8 +110,8 @@ Three lessons are encoded in the code:
   relied upon, and the kernel stack may live anywhere below 4 GiB.
 * The kernel still runs on the firmware's page tables and has not called
   `ExitBootServices`. Owning the memory is the next step of M2.
-* No TSS yet. Selector 0x18 is reserved for it, and the IST support in the
-  IDT is left at zero until the TSS exists.
+* The TSS descriptor is now implemented in ADR-0008. It occupies selector
+  0x18 (indices 3 and 4), and the IDT uses IST1 for `#NMI`, `#DF` and `#MC`.
 
 ## References
 
