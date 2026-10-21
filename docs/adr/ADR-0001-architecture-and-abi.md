@@ -143,7 +143,7 @@ but unverified one.
   Applications).
 * Intel 64 and IA-32 Architectures Software Developer's Manual, volumes 2
   and 3 (interrupt handling, IDT format, memory map).
-* `docs/specs/boot-protocol-v1.md` — the normative description of the
+* `docs/specs/boot-protocol-v2.md` — the normative description of the
   handover.
 * `docs/adr/ADR-0002-boot-protocol.md` — the protocol decision in detail.
 * `docs/adr/ADR-0003-kernel-load-address.md` — the fixed load address.

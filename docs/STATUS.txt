@@ -3,28 +3,31 @@ Data UTC: 2026-10-21 (data da atualização; hora não aferida)
 Projeto: AzuraOS
 Versão planejada: 0.1.0 (marco interno M0+M1); versão/tag publicada: nenhuma
 Arquitetura: x86_64 / UEFI; AArch64 e RISC-V futuros, não suportados
-Branch: main; repositório Git inicializado e publicado pelo responsável durante
-         a sessão (origin = https://github.com/CeoMatheusDev/AzuraOS.git)
-Último commit verificado: 1e87504 "Merge pull request #1 from
-                          CeoMatheusDev/feat/m2-kernel-ownership" (main);
-                          CI verde no run 39537277273
+Branch: feat/m2-exit-boot-services (M2.2); main em a6847b5 (licença Apache-2.0)
+         origin = https://github.com/CeoMatheusDev/AzuraOS.git
+Último commit verificado em main: a6847b5 "docs: record the Apache-2.0
+                          decision" ; CI verde no run 39538043356
 Última tag publicada: nenhuma
 Zig version: 0.17.0 VERIFICADA no Fedora 44 (zig version -> 0.17.0)
 QEMU: 10.2.2 VERIFICADO; OVMF: edk2-ovmf-20260812 VERIFICADO
 Estado geral: M1 CONCLUÍDO; M2.1 (GDT própria) CONCLUÍDO e integrado em main
-              (PR #1, merge 1e87504). Próximo marco: M2.2 (ExitBootServices).
-              Evidência M1: docs/testing/m1-boot-evidence.md
+              (PR #1, merge 1e87504); M2.2 (ExitBootServices) IMPLEMENTADO na
+              branch, aguardando merge. Evidência M1:
+              docs/testing/m1-boot-evidence.md; evidência M2.2:
+              docs/testing/m2.2-exitbootservices-evidence.md
 
 OBJETIVO DA TAREFA
 M0.1: estabelecer requisitos de toolchain, estratégia de build reproduzível e inventário Fedora.
 
 ESTADO ATUAL (resumo; o registro cronológico completo está abaixo)
 Implementado e VERIFICADO em QEMU/OVMF: bootloader UEFI, kernel freestanding,
-protocolo de boot v1, driver serial, splash no framebuffer, IDT de exceções,
-build.zig, build.zig.zon, imagem ESP, testes automatizados de boot e de falha.
+protocolo de boot v2, driver serial, splash no framebuffer, GDT e IDT próprias,
+ExitBootServices com retry de chave, imagem ESP, testes automatizados de boot,
+de falha e de retry.
 Implementado e verificado: docs/TOOLCHAIN.md, tools/check-toolchain.sh.
-Não iniciado: M2 (GDT/páginas próprias, ExitBootServices, alocadores, drivers),
-M3 (processos, escalonador, syscalls, IPC) e os demais marcos.
+Não iniciado: M2.3 (alocador físico), M2.4 (paginação própria), M2.5 (heap),
+M2.6+ (timer, drivers), M3 (processos, escalonador, syscalls, IPC) e os demais
+marcos.
 Licença: Apache-2.0 (ADR-0006); LICENSE e NOTICE criados em 2026-10-21.
 Repositório Git inicializado e publicado em origin.
 
@@ -578,3 +581,65 @@ VALIDAÇÃO
 
 ROLLBACK: nenhuma tag ou release foi criada; o LICENSE pode ser removido sem
 afetar o código.
+
+================================================================================
+2026-10-21 — M2.2 ExitBootServices
+================================================================================
+
+ESCOPO
+  O bootloader chama ExitBootServices com a chave do último GetMemoryMap,
+  trata EFI_INVALID_PARAMETER com retry limitado e só entrega a máquina
+  depois do sucesso. O kernel recusa iniciar sem a transição e comprova que
+  stack, GDT, IDT, framebuffer e mapa sobreviveram.
+
+DECISÕES
+  - A chamada fica no bootloader: ele tem o image handle e o system table, e
+    o kernel nunca recebe o system table. Não existe ponteiro de boot
+    services no kernel para "derrubar".
+  - Protocolo de boot v2, 160 bytes, magic "AZURAS2": stack_base,
+    memory_map_key e boot_services_exited foram acrescentados ao final, sem
+    mover os offsets dos campos v1.
+  - O mapa entregue é o snapshot ANTERIOR ao ExitBootServices. As regiões
+    boot_services ficam livres no hardware, mas em quarentena até o M2.3;
+    a política está no ADR-0007.
+  - O buffer do mapa é dimensionado pelo tamanho reportado pelo firmware;
+    descriptor_size é validado antes de ser usado como stride.
+  - boot_info, stack e buffer do mapa vêm do pool (loader_data). O boot_info
+    não mora mais na pilha do bootloader.
+  - Splash e console acontecem antes do ExitBootServices. Depois do sucesso
+    só há COM1 e framebuffer (MMIO), e o salto para o kernel não retorna.
+  - ADR-0007 registra a propriedade da memória depois da transição.
+
+VALIDAÇÃO (QEMU/OVMF, Fedora 44, Zig 0.17.0)
+  zig fmt --check build.zig boot kernel shared tools -> PASS
+  zig build                                           -> PASS
+  zig build test                                      -> PASS
+    boot-test:      PASS
+    fault-test:     PASS (vetores 6 e 13, cs=0x8, error_code=0xa0)
+    ebs-retry-test: PASS (chave 0x731 rejeitada; 0x733 aceita)
+  Evidência medida: docs/testing/m2.2-exitbootservices-evidence.md
+
+  Boot normal:
+    final memory map: 85 entries, key=0x731
+    ExitBootServices: attempt 1, key=0x731 -> success
+    kernel: boot services: exited, memory map key=0x731
+    kernel: post-ExitBootServices: stack=ok gdt=ok idt=ok framebuffer=ok
+            memory_map=ok
+  Framebuffer checksum igual antes e depois: 0xd43a1e5ec0808a0d.
+  CR3 herdado do firmware: 0x1f401000 (as page tables próprias são M2.4).
+
+LIMITAÇÕES / RISCOS
+  - Testado apenas em QEMU/OVMF; nenhum hardware físico foi exercitado.
+  - As page tables ainda são as do firmware; o kernel só as lê e registra.
+  - O mapa é pré-EBS; boot_services não é alocado até o M2.3.
+  - A imagem do kernel continua marcada como conventional no mapa. O range é
+    reservado pelo protocolo e o M2.3 precisa subtraí-lo antes de alocar.
+  - Sem TSS/IST: uma falha na pilha do kernel ainda não tem pilha alternativa.
+  - O caminho de retry é exercitado por injeção (-Dstale-map-key=true), não
+    por uma condição espontânea do firmware.
+
+PRÓXIMOS PASSOS
+  1. Publicar a branch, abrir PR e exigir CI verde.
+  2. Depois do merge, atualizar README/STATUS com o commit de merge e o run.
+  3. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.
+  4. M2.3 (alocador físico) aplicando o ADR-0007; TSS/IST na sequência.

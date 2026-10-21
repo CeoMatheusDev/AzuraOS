@@ -1,5 +1,9 @@
 # M1 boot evidence
 
+> Historical record of M1. The statements below about the GDT and about
+> `ExitBootServices` describe the M1 artifacts; M2.1 and M2.2 superseded
+> them. Current evidence: `docs/testing/m2.2-exitbootservices-evidence.md`.
+
 Everything on this page was produced by running the commands shown, on the
 machine described below. Nothing here is a projection of what the code
 should do.

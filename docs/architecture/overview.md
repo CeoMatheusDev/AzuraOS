@@ -71,15 +71,17 @@ firmware  --->  bootloader  --->  kernel
 
 ## Memory map
 
-The kernel has no virtual memory management yet. The M1 kernel runs with the
-firmware's identity mapped page tables and the firmware's GDT, which means:
+The kernel has no virtual memory management yet. After M2.2 the firmware's
+boot services are gone, but the kernel still runs on the firmware's identity
+mapped page tables, which means:
 
 * physical addresses are directly addressable,
 * the kernel is limited to the 4 GiB below the identity window,
-* no isolation between the kernel and the firmware exists.
+* no isolation between the kernel and other software exists.
 
-Owning the machine (own GDT, own page tables, `ExitBootServices`) is the
-first task of M2.
+The GDT has been the kernel's own since M2.1. The page tables become the
+kernel's own in M2.4. Which physical memory the kernel may touch after the
+transition, and when, is ADR-0007.
 
 ## Where the desktop comes from
 
@@ -94,6 +96,8 @@ asset is original to this project.
 * `docs/adr/ADR-0001-architecture-and-abi.md`
 * `docs/adr/ADR-0002-boot-protocol.md`
 * `docs/adr/ADR-0003-kernel-load-address.md`
-* `docs/specs/boot-protocol-v1.md`
+* `docs/adr/ADR-0007-memory-ownership-after-exitbootservices.md`
+* `docs/specs/boot-protocol-v2.md`
 * `docs/roadmap/milestones.md`
 * `docs/testing/m1-boot-evidence.md`
+* `docs/testing/m2.2-exitbootservices-evidence.md`
