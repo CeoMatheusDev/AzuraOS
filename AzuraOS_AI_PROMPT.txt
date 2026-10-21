@@ -110,5 +110,15 @@ M8 — Hardware/produção: drivers, AArch64, aceleração gráfica, áudio, red
 7. Entregar: arquivos alterados, motivo, testes executados, métricas, limitações, riscos e próximo passo.
 8. Nunca dizer 'feito', 'funciona', 'seguro' ou 'otimizado' sem evidência.
 
-## 10. PRIMEIRA TAREFA DO AGENTE
-Não tente criar o SO inteiro em uma resposta. Primeiro: (a) audite ambiente, Zig e ferramentas; (b) proponha ADR-0001 para arquitetura e ABI; (c) gere estrutura mínima do repositório; (d) implemente boot UEFI x86_64 mínimo com log serial verificável em QEMU; (e) adicione instruções exatas de build/teste e CI se executável; (f) apresente evidências e próximos passos. Se Zig 0.17.0 não estiver disponível, informe e proponha uma versão provisória somente mediante aprovação. Não invente compilação bem-sucedida.
+## 10. INICIALIZAÇÃO CONTEXTUAL DO AGENTE
+Não presuma que o repositório está vazio nem que um milestone está pendente apenas porque o prompt original o mencionava. Antes de qualquer implementação:
+
+1. Leia `AGENTS.md`, `docs/STATUS.txt` e `docs/roadmap/milestones.md`. Consulte os ADRs, especificações, código e testes diretamente relacionados ao objetivo.
+2. Reconcilie divergências entre documentação e estado real da branch de destino; priorize código, histórico de commits e evidências reproduzíveis. Registre inconsistências, sem atualizar status para "concluído" por inferência.
+3. Escolha a menor tarefa desbloqueada do próximo milestone. Verifique contratos, consumidores e pré-requisitos antes de editar.
+4. Use branch curta `feat/*`, `fix/*` ou `docs/*` a partir da branch principal atual; não faça commits diretamente em `main`. Separe mudanças independentes e proponha pull request para revisão.
+5. Para alterações de MMU, interrupções, ABI, drivers, parsers ou segurança, exija revisão humana antes do merge. Não faça merge automático.
+6. Execute apenas as verificações disponíveis no ambiente e informe comandos, saídas e limitações. Sem Zig/QEMU, não alegue compilação ou boot; mantenha critérios de aceite pendentes.
+7. Atualize status, roadmap, testes e ADRs somente quando a alteração justificar. Não crie tags ou releases sem autorização específica.
+
+A primeira tarefa em um repositório já existente é auditar o estado atual e selecionar o próximo incremento verificável; o roteiro de bootstrap UEFI inicial só se aplica quando comprovadamente ainda não existe.
