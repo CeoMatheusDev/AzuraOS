@@ -7,13 +7,13 @@ management, scheduler, IPC, drivers, userland, libraries and a desktop
 environment. Nothing is inherited from an existing kernel, and no
 compatibility is claimed unless it has been demonstrated.
 
-> **Status: M2.3 (physical frame allocator) merged into `main`.** M2.2 and
-> M2.2b are merged into `main`: the bootloader hands the machine over with
-> the boot services gone, and the kernel proves that the stack, the GDT, the
-> IDT, the framebuffer and the memory map survived. The kernel owns a TSS,
-> routes `#NMI`, `#DF` and `#MC` to an alternate stack, and now builds a
-> physical frame allocator from the pre-`ExitBootServices` map. The next step
-> is the kernel's own page tables (M2.4).
+> **Status: M2.4 (own paging) implemented on `feat/m2.4-own-paging`; the pull
+> request is pending.** M2.3 is merged into `main`: the kernel builds a
+> physical frame allocator from the pre-`ExitBootServices` map, reserves the
+> kernel image and releases the boot services quarantine once it owns the
+> page tables. The kernel now installs its own 4-level page tables, enforces
+> W^X on the kernel image, and reports `CR2` on a page fault. The next step
+> is the kernel heap (M2.5).
 
 ## Current state
 
@@ -25,7 +25,8 @@ compatibility is claimed unless it has been demonstrated.
 | M2.2 `ExitBootServices` | done, merged in `02e5f3d` (PR #2) | `docs/testing/m2.2-exitbootservices-evidence.md` |
 | M2.2b TSS and IST | done, merged in `c376528` (PR #5) | `docs/testing/m2.2b-tss-ist-evidence.md` |
 | M2.3 Physical frame allocator | done, merged in `870b677` (PR #6) | `docs/testing/m2.3-frames-evidence.md` |
-| CI (GitHub Actions) | **passing** | run 39635441041 (main, `870b677`) |
+| M2.4 Own paging | implemented, PR pending | `docs/testing/m2.4-paging-evidence.md` |
+| CI (GitHub Actions) | **passing on `main`** | run 39636012547 (main, `7b5b8eb`); M2.4 PR pending |
 | M3 Execution | not started | — |
 
 The boot chain implemented today:
@@ -46,6 +47,8 @@ OVMF (UEFI firmware)
                  ├─ builds a 4 KiB frame allocator from the memory map
                  ├─ reserves the kernel image, loader data and low 1 MiB
                  ├─ allocates, writes, releases and reuses three frames
+                 ├─ installs its own 4-level page tables with W^X
+                 ├─ releases the firmware tables and the boot services quarantine
                  └─ halts
 ```
 
@@ -190,10 +193,14 @@ docs/testing/       measured evidence
   order in which the descriptors are installed.
 * `docs/adr/ADR-0009-physical-frame-allocator.md` — the frame bitmap, the
   boot services quarantine and the allocation policy.
+* `docs/adr/ADR-0010-own-paging.md` — the kernel's own page tables, W^X and
+  the release of the boot services quarantine.
 * `docs/specs/boot-protocol-v2.md` — field by field specification.
 * `docs/specs/m2.2b-tss-ist.md` — acceptance criteria for the TSS and IST.
 * `docs/specs/m2.3-physical-frames.md` — acceptance criteria for the physical
   frame allocator.
+* `docs/specs/m2.4-own-paging.md` — acceptance criteria for the kernel's own
+  page tables.
 * `docs/testing/m1-boot-evidence.md` — the measured evidence of M1.
 * `docs/testing/m2.2-exitbootservices-evidence.md` — the measured evidence
   of the transition, the stale key retry and the fault path after it.
@@ -201,6 +208,8 @@ docs/testing/       measured evidence
   alternate stack and the forced double fault.
 * `docs/testing/m2.3-frames-evidence.md` — the measured evidence of the frame
   allocator, the boot self-test and the stress test.
+* `docs/testing/m2.4-paging-evidence.md` — the measured evidence of the page
+  tables, W^X and the controlled page fault.
 * `docs/STATUS.txt` — the running status log.
 * `docs/TOOLCHAIN.md` — the toolchain policy.
 * `docs/BUILD_CONTRACT.md` — the build invariants.
@@ -215,12 +224,15 @@ docs/testing/       measured evidence
   buffer capture.
 * There is no graphical desktop, no userland, no filesystem and no driver
   yet. The roadmap lives in `docs/roadmap/milestones.md`.
-* The kernel still runs on the firmware's page tables; it does not install
-  its own until M2.4. The boot log prints the CR3 it inherited on every boot.
-* The frame allocator frees conventional memory only. Boot services memory is
-  covered by the bitmap but stays quarantined until M2.4, because the active
-  firmware page tables live there; see ADR-0007 and ADR-0009. The first 1 MiB
-  is reserved, and memory above 4 GiB is outside the bitmap in M2.3.
+* The kernel now installs its own 4-level page tables and enables W^X on the
+  kernel image. The boot log prints the inherited CR3 and the CR3 the kernel
+  chose. Large pages, user mode and per-process address spaces are later
+  milestones.
+* The frame allocator frees conventional memory and, after the page tables
+  are installed, the boot services memory. The first 1 MiB is reserved, and
+  memory above 4 GiB is outside the bitmap in M2.3.
+* The memory map is the pre-`ExitBootServices` snapshot. See ADR-0007 and
+  ADR-0009.
 * The TSS is loaded and `#NMI`, `#DF` and `#MC` use the IST stack, but the
   handler still halts the machine. There is no ring 3 and `rsp0` still points
   at the boot stack; both are M3 work.

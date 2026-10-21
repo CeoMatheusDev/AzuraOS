@@ -823,3 +823,74 @@ PRÓXIMOS PASSOS
   1. M2.4: page tables próprias, W^X/NX e liberação da quarentena de boot
      services.
   2. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.
+
+================================================================================
+2026-10-21 — M2.4 page tables próprias
+================================================================================
+
+ESCOPO
+  O kernel constrói e instala suas próprias page tables de 4 níveis, ativa o
+  NX, impõe W^X na imagem do kernel, libera as tabelas do firmware e a
+  quarentena de boot services, e reporta CR2 em um page fault.
+
+DECISÕES
+  - 4 níveis, folhas de 4 KiB. EFER.NXE é ativado antes de qualquer tabela.
+    O bit NX só é válido em entradas folha; nas intermediárias ele é
+    reservado e levanta #GP.
+  - Identity map de todos os descritores não-unusable, mais o MMIO do
+    framebuffer. A imagem do kernel é remapeada depois com W^X: .text RX,
+    .rodata R+NX, .data/.bss RW+NX. As seções são alinhadas a 4 KiB no
+    linker script.
+  - As tabelas vêm do alocador de frames e são zeradas. As tabelas
+    intermediárias são alocadas sob demanda.
+  - A troca de CR3 ocorre com interrupções desabilitadas; as tabelas antigas
+    e a quarentena de boot services são liberadas depois da troca.
+  - O handler de #PF reporta CR2. O modo -Dfault-mode=page_fault lê
+    0xdead0000 e o handler reporta o vetor 14 com esse endereço.
+
+VALIDAÇÃO LOCAL (QEMU/OVMF, Fedora 44, Zig 0.17.0, QEMU 10.2.2)
+  zig fmt --check build.zig boot kernel shared tools -> PASS
+  zig build                                           -> PASS
+  zig build test                                      -> PASS
+    boot-test:          PASS
+    fault-test:         PASS
+    ebs-retry-test:     PASS
+    double-fault-test:  PASS
+
+  Boot normal:
+    page tables: the firmware's (CR3=0x1f401000), the kernel's own are M2.4
+    paging: EFER before=0xd00 after=0xd00
+    paging: new page tables at 0x130000, CR3=0x130000
+    paging: released boot services quarantine, free frames 113063 -> 122983
+    paging: text=0x100000..0x1068d4 rodata=0x107000..0x10981c
+            data=0x10a000..0x10a000 bss=0x10a000..0x12f150
+    post-ExitBootServices: stack=ok gdt=ok idt=ok tss=ok ist=ok frames=ok
+                          framebuffer=ok memory_map=ok
+    boot complete, halting
+
+  Page fault controlado (-Dfault-mode=page_fault):
+    KERNEL FAULT: vector 14 (page fault)
+    KERNEL FAULT: error_code=0x0
+    KERNEL FAULT: cr2=0xdead0000
+    KERNEL FAULT: handler stack=0x1e00bca7 (dentro da pilha de boot)
+
+  Evidência medida: docs/testing/m2.4-paging-evidence.md
+  Critérios:        docs/specs/m2.4-own-paging.md
+  Decisão:          docs/adr/ADR-0010-own-paging.md
+
+PUBLICAÇÃO E CI
+  Branch feat/m2.4-own-paging a ser publicada; PR e CI pendentes.
+
+LIMITAÇÕES / RISCOS
+  - Testado apenas em QEMU/OVMF; nenhum hardware físico foi exercitado.
+  - Apenas folhas de 4 KiB; large pages não implementadas.
+  - Sem modo usuário, sem espaços de endereçamento por processo, sem TLB
+    shootdown. O kernel roda com interrupções desabilitadas em uma CPU.
+  - O page fault de teste é injetado, não espontâneo.
+  - O setor .data está vazio neste build (todos os globais estão em .bss);
+    o mapeamento W^X cobre mesmo assim.
+
+PRÓXIMOS PASSOS
+  1. Publicar a branch, abrir o PR, aguardar CI verde e integrar em main.
+  2. M2.5: heap do kernel e testes de fragmentação.
+  3. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.

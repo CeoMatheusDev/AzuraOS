@@ -118,6 +118,62 @@ pub fn readCr3() u64 {
     );
 }
 
+/// Write a new page table base (CR3).
+///
+/// The caller must have built a complete, valid page table tree before
+/// calling this: the instruction does not validate the tree and a bad
+/// value raises #GP or faults on the next memory access.
+pub fn writeCr3(value: u64) void {
+    asm volatile ("movq %[value], %%cr3"
+        :
+        : [value] "r" (value),
+        : .{ .memory = true });
+}
+
+/// Read EFER (for diagnostics).
+pub fn readEfer() u64 {
+    return readMsr(0xc0000080);
+}
+
+/// Enable the no-execute page protection bit in EFER.
+///
+/// NX is only meaningful when this bit is set. Writing page table entries
+/// with the NX bit before enabling it raises #GP when the entry is used.
+pub fn enableNx() void {
+    // EFER is MSR 0xC0000080. Bit 11 is NXE.
+    const efer: u64 = readMsr(0xc0000080);
+    writeMsr(0xc0000080, efer | (1 << 11));
+}
+
+fn readMsr(msr: u32) u64 {
+    var low: u32 = undefined;
+    var high: u32 = undefined;
+    asm volatile ("rdmsr"
+        : [low] "={eax}" (low),
+          [high] "={edx}" (high),
+        : [msr] "{ecx}" (msr),
+    );
+    return (@as(u64, high) << 32) | low;
+}
+
+fn writeMsr(msr: u32, value: u64) void {
+    const low: u32 = @truncate(value);
+    const high: u32 = @truncate(value >> 32);
+    asm volatile ("wrmsr"
+        :
+        : [msr] "{ecx}" (msr),
+          [low] "{eax}" (low),
+          [high] "{edx}" (high),
+    );
+}
+
+/// Read the faulting virtual address (CR2).
+pub fn readCr2() u64 {
+    return asm volatile ("movq %%cr2, %[value]"
+        : [value] "=r" (-> u64),
+    );
+}
+
 /// Halt the CPU until the next interrupt.
 pub fn halt() void {
     asm volatile ("hlt");

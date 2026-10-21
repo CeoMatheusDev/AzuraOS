@@ -101,6 +101,20 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
   `docs/specs/m2.3-physical-frames.md` and
   `docs/testing/m2.3-frames-evidence.md`: the allocator decision, the
   acceptance criteria and the measured evidence.
+- `kernel/arch/x86_64/paging.zig`: 4-level page table builder with 4 KiB
+  leaves, identity mapping of the memory map, W^X section mapping and
+  table allocation from the frame pool.
+- `kernel/arch/x86_64/cpu.zig`: `writeCr3`, `enableNx` and `readCr2`.
+- `kernel/linker.ld`: 4 KiB alignment of the kernel sections, with
+  `__text_start`, `__rodata_start`, `__data_start` and `__bss_start`
+  boundaries for the W^X mapping.
+- `kernel/arch/x86_64/idt.zig`: the page fault handler reports `CR2`.
+- `kernel/main.zig`: `initPaging`, which builds and switches to the
+  kernel's own tables, releases the firmware tables and the boot services
+  quarantine, and logs the section ranges.
+- `docs/adr/ADR-0010-own-paging.md`, `docs/specs/m2.4-own-paging.md` and
+  `docs/testing/m2.4-paging-evidence.md`: the paging decision, the
+  acceptance criteria and the measured evidence.
 
 ### Changed
 
@@ -158,6 +172,11 @@ pre-release. That decision is recorded in `docs/STATUS.txt`.
   tables live there; M2.4 releases it after installing the kernel's own page
   tables. This defers, but does not change, the ownership policy in
   ADR-0007.
+- The kernel now installs its own 4-level page tables with `EFER.NXE` enabled
+  and W^X on the kernel image. The boot services quarantine is released after
+  the switch, adding about 9,920 frames to the pool.
+- The page fault handler reports `CR2`. A `-Dfault-mode=page_fault` build
+  reads `0xdead0000` and the handler reports vector 14 with that address.
 
 ### Fixed
 

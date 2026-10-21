@@ -311,6 +311,9 @@ export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void 
     if (context.error_code) |error_code| {
         com1.print("[azura] KERNEL FAULT: error_code=0x{x}\n", .{error_code});
     }
+    if (vector == 14) {
+        com1.print("[azura] KERNEL FAULT: cr2=0x{x}\n", .{cpu.readCr2()});
+    }
     com1.print("[azura] KERNEL FAULT: handler stack=0x{x}\n", .{@intFromPtr(&stack_probe)});
     com1.write("[azura] KERNEL FAULT: machine halted\n");
     cpu.haltForever();

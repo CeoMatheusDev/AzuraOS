@@ -21,23 +21,31 @@ SECTIONS
 {
     . = 0x100000;
 
-    .text : {
+    .text : ALIGN(0x1000) {
+        __text_start = .;
         *(.text .text.*)
+        __text_end = .;
     }
 
-    .rodata : {
+    .rodata : ALIGN(0x1000) {
+        __rodata_start = .;
         *(.rodata .rodata.*)
         *(.eh_frame_hdr)
         *(.eh_frame)
+        __rodata_end = .;
     }
 
-    .data : {
+    .data : ALIGN(0x1000) {
+        __data_start = .;
         *(.data .data.*)
         *(.got .got.plt)
+        __data_end = .;
     }
 
-    .bss : {
+    .bss : ALIGN(0x1000) {
+        __bss_start = .;
         *(.bss .bss.*)
         *(COMMON)
+        __bss_end = .;
     }
 }
