@@ -288,19 +288,7 @@ pub fn verifyEntries() ?u8 {
 /// Called with the System V C ABI, so the stub must have left the stack
 /// pointer 16 byte aligned and the direction flag clear. See `makeStub`.
 export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void {
-    const context = exception.decodeFrame(vector, frame);
-    com1.print("[azura] KERNEL FAULT: vector {d} ({s})\n", .{
-        vector,
-        exception.vectorName(vector),
-    });
-    com1.print("[azura] KERNEL FAULT: rip=0x{x} cs=0x{x} rflags=0x{x}\n", .{
-        context.rip,
-        context.cs,
-        context.rflags,
-    });
-    if (context.error_code) |error_code| {
-        com1.print("[azura] KERNEL FAULT: error_code=0x{x}\n", .{error_code});
-    }
+    // Validate the #DF frame on IST1 before dereferencing it.
     if (vector == 8) {
         const bounds = gdt.doubleFaultStackBounds();
         const frame_address = @intFromPtr(frame);
@@ -316,6 +304,24 @@ export fn azuraCommonHandler(vector: u8, frame: *const Frame) callconv(.c) void 
         com1.print("[azura] DOUBLE FAULT: frame=0x{x} IST1=[0x{x},0x{x}) active={s}\n", .{
             frame_address, bounds.base, bounds.top, if (on_ist1) "yes" else "no",
         });
+        if (!on_ist1) {
+            com1.write("[azura] KERNEL FAULT: invalid double-fault frame; machine halted\n");
+            cpu.haltForever();
+        }
+    }
+
+    const context = exception.decodeFrame(vector, frame);
+    com1.print("[azura] KERNEL FAULT: vector {d} ({s})\n", .{
+        vector,
+        exception.vectorName(vector),
+    });
+    com1.print("[azura] KERNEL FAULT: rip=0x{x} cs=0x{x} rflags=0x{x}\n", .{
+        context.rip,
+        context.cs,
+        context.rflags,
+    });
+    if (context.error_code) |error_code| {
+        com1.print("[azura] KERNEL FAULT: error_code=0x{x}\n", .{error_code});
     }
     com1.write("[azura] KERNEL FAULT: machine halted\n");
     cpu.haltForever();
