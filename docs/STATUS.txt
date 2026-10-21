@@ -3,11 +3,11 @@ Data UTC: 2026-10-21 (data da atualização; hora não aferida)
 Projeto: AzuraOS
 Versão planejada: 0.1.0 (marco interno M0+M1); versão/tag publicada: nenhuma
 Arquitetura: x86_64 / UEFI; AArch64 e RISC-V futuros, não suportados
-Branch: feat/m2-exit-boot-services (M2.2), PR #2 aberto; runs 39541716000
-         (push) e 39541741793 (PR) verdes; main em a6847b5 (licença Apache-2.0)
+Branch: main; M2.2 integrado em 02e5f3d (PR #2); CI verde no run 39542990749
          origin = https://github.com/CeoMatheusDev/AzuraOS.git
-Último commit verificado em main: a6847b5 "docs: record the Apache-2.0
-                          decision" ; CI verde no run 39538043356
+Último commit verificado em main: 02e5f3d "Merge pull request #2 from
+                          CeoMatheusDev/feat/m2-exit-boot-services";
+                          CI verde no run 39542990749
 Última tag publicada: nenhuma
 Zig version: 0.17.0 VERIFICADA no Fedora 44 (zig version -> 0.17.0)
 QEMU: 10.2.2 VERIFICADO; OVMF: edk2-ovmf-20260812 VERIFICADO
@@ -628,6 +628,11 @@ PUBLICAÇÃO E CI
   "Run the ExitBootServices retry test" rodou no CI e passou:
   chave 0x731 rejeitada, 0x733 aceita.
 
+MERGE
+  PR #2 integrado em main com merge commit 02e5f3d, autorizado pelo
+  responsável; CI verde no run 39542990749 (main): zig fmt e
+  Build and test PASS.
+
   Boot normal:
     final memory map: 85 entries, key=0x731
     ExitBootServices: attempt 1, key=0x731 -> success
@@ -648,7 +653,6 @@ LIMITAÇÕES / RISCOS
     por uma condição espontânea do firmware.
 
 PRÓXIMOS PASSOS
-  1. Aguardar a revisão e o merge do PR #2 (CI verde).
-  2. Depois do merge, atualizar README/STATUS com o commit de merge e o run.
+  1. M2.2b: TSS com IST para #DF, NMI e #MC, com teste de dupla falta.
+  2. M2.3 (alocador físico) aplicando o ADR-0007.
   3. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.
-  4. M2.3 (alocador físico) aplicando o ADR-0007; TSS/IST na sequência.

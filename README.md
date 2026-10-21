@@ -7,11 +7,10 @@ management, scheduler, IPC, drivers, userland, libraries and a desktop
 environment. Nothing is inherited from an existing kernel, and no
 compatibility is claimed unless it has been demonstrated.
 
-> **Status: M2.2 (`ExitBootServices`) implemented on its branch.** The
-> bootloader now hands the machine over with the boot services gone, and the
-> kernel proves that the stack, the GDT, the IDT, the framebuffer and the
-> memory map survived. PR #2 is open with a green CI; the merge into `main`
-> is pending.
+> **Status: M2.2 (`ExitBootServices`) merged into `main`.** The bootloader
+> hands the machine over with the boot services gone, and the kernel proves
+> that the stack, the GDT, the IDT, the framebuffer and the memory map
+> survived. The next step is the TSS with an IST stack for critical faults.
 
 ## Current state
 
@@ -20,8 +19,8 @@ compatibility is claimed unless it has been demonstrated.
 | M0 Engineering | done | `docs/STATUS.txt`, `docs/TOOLCHAIN.md`, reproducible build graph |
 | M1 Boot | done | `docs/testing/m1-boot-evidence.md` |
 | M2.1 Kernel GDT | done, merged in `1e87504` (PR #1) | `docs/adr/ADR-0004-kernel-gdt.md` |
-| CI (GitHub Actions) | **passing** | run 39537277273 (main, `1e87504`) |
-| M2.2 `ExitBootServices` | done, PR #2 open with green CI; merge pending | `docs/testing/m2.2-exitbootservices-evidence.md` |
+| CI (GitHub Actions) | **passing** | run 39542990749 (main, `02e5f3d`) |
+| M2.2 `ExitBootServices` | done, merged in `02e5f3d` (PR #2) | `docs/testing/m2.2-exitbootservices-evidence.md` |
 | M3 Execution | not started | — |
 
 The boot chain implemented today:
