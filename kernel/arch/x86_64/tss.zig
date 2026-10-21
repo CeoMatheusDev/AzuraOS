@@ -91,13 +91,20 @@ pub fn firmwareSelectorCompatible(firmware_cs: u16) bool {
 }
 
 /// Verify a downward-growing stack is usable as an IST stack.
-/// The top must be 16-byte aligned and canonical in 48-bit VA mode.
+/// Both bounds must be canonical in 48-bit VA mode, and the top aligned.
 /// Mapping, reservation, and guard pages are checked separately at boot.
 pub fn validIstStack(base: u64, top: u64) bool {
     if (base == 0 or top <= base or top - base < 4096) return false;
     if ((top & 15) != 0) return false;
-    const sign = top >> 47;
-    return sign == 0 or sign == 0x1ffff;
+    return canonical48(base) and canonical48(top - 1);
+}
+
+fn canonical48(address: u64) bool {
+    const upper = address >> 48;
+    return if ((address & (@as(u64, 1) << 47)) == 0)
+        upper == 0
+    else
+        upper == 0xffff;
 }
 
 comptime {
@@ -123,4 +130,7 @@ test "IST stack boundaries reject invalid ranges" {
     try std.testing.expect(!validIstStack(0x100000, 0x100100));
     try std.testing.expect(!validIstStack(0x100000, 0x104008));
     try std.testing.expect(!validIstStack(0x100000, 0x0001_0000_0000_0000));
+    try std.testing.expect(!validIstStack(0x0000_7fff_ffff_f000, 0x0000_8000_0000_1000));
+    try std.testing.expect(!validIstStack(0x0000_8000_0000_0000, 0x0000_8000_0000_2000));
+    try std.testing.expect(validIstStack(0xffff_8000_0000_0000, 0xffff_8000_0000_4000));
 }
