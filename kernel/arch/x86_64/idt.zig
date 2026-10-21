@@ -23,6 +23,7 @@
 const com1 = @import("com1");
 const cpu = @import("cpu.zig");
 const exception = @import("exception.zig");
+const tss = @import("tss.zig");
 
 /// One IDT entry. 16 bytes, as required by the 64-bit IDT format.
 pub const Entry = extern struct {
@@ -90,7 +91,7 @@ var handler_address: usize = 0;
 /// Must be called with interrupts disabled. After this call every CPU
 /// exception lands in `commonHandler` instead of escalating to a triple
 /// fault.
-pub fn install(code_selector: u16) void {
+pub fn install(code_selector: u16, task_register_ready: bool) void {
     handler_address = @intFromPtr(&azuraCommonHandler);
 
     inline for (0..exception_vector_count) |vector| {
@@ -98,7 +99,7 @@ pub fn install(code_selector: u16) void {
         table[vector] = .{
             .offset_low = @truncate(stub),
             .selector = code_selector,
-            .ist = 0,
+            .ist = if (vector == 8 and task_register_ready) tss.double_fault_ist else 0,
             .type_attr = gate_type,
             .offset_middle = @truncate(stub >> 16),
             .offset_high = @truncate(stub >> 32),
