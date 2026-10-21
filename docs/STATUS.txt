@@ -790,6 +790,19 @@ VALIDAÇÃO LOCAL (QEMU/OVMF, Fedora 44, Zig 0.17.0, QEMU 10.2.2)
   Critérios:        docs/specs/m2.3-physical-frames.md
   Decisão:          docs/adr/ADR-0009-physical-frame-allocator.md
 
+PUBLICAÇÃO E CI
+  Branch feat/m2.3-physical-frames publicada (commits 83ff6d1 e 7e14b22);
+  PR #6 aberto em https://github.com/CeoMatheusDev/AzuraOS/pull/6.
+  Runs 39633605350 (push) e 39633668780 (PR): zig fmt PASS e
+  Build and test PASS (2m49s-3m42s). O passo
+  "Run the double fault IST test" passou com IST 0x129190..0x12d190 e
+  handler 0x12d127.
+
+MERGE
+  PR #6 integrado em main com merge commit 870b677, depois de CI verde em
+  main no run 39635441041 (zig fmt e Build and test PASS). Nenhuma tag ou
+  release foi criada. Rollback: "git revert -m 1 870b677".
+
 LIMITAÇÕES / RISCOS
   - Testado apenas em QEMU/OVMF; nenhum hardware físico foi exercitado.
   - O kernel ainda usa o identity map do firmware. O self-test só escreve nos
@@ -807,7 +820,6 @@ LIMITAÇÕES / RISCOS
     reserva de alocação. Hoje só o self-test libera frames, e apenas os seus.
 
 PRÓXIMOS PASSOS
-  1. Publicar a branch, abrir o PR, aguardar CI verde e integrar em main.
-  2. M2.4: page tables próprias, W^X/NX e liberação da quarentena de boot
+  1. M2.4: page tables próprias, W^X/NX e liberação da quarentena de boot
      services.
-  3. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.
+  2. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.

@@ -7,14 +7,13 @@ management, scheduler, IPC, drivers, userland, libraries and a desktop
 environment. Nothing is inherited from an existing kernel, and no
 compatibility is claimed unless it has been demonstrated.
 
-> **Status: M2.3 (physical frame allocator) implemented on
-> `feat/m2.3-physical-frames`; the pull request is pending.** M2.2 and M2.2b
-> are merged into `main`: the bootloader hands the machine over with the boot
-> services gone, and the kernel proves that the stack, the GDT, the IDT, the
-> framebuffer and the memory map survived. The kernel owns a TSS, routes
-> `#NMI`, `#DF` and `#MC` to an alternate stack, and now builds a physical
-> frame allocator from the pre-`ExitBootServices` map. The next step is the
-> kernel's own page tables (M2.4).
+> **Status: M2.3 (physical frame allocator) merged into `main`.** M2.2 and
+> M2.2b are merged into `main`: the bootloader hands the machine over with
+> the boot services gone, and the kernel proves that the stack, the GDT, the
+> IDT, the framebuffer and the memory map survived. The kernel owns a TSS,
+> routes `#NMI`, `#DF` and `#MC` to an alternate stack, and now builds a
+> physical frame allocator from the pre-`ExitBootServices` map. The next step
+> is the kernel's own page tables (M2.4).
 
 ## Current state
 
@@ -25,8 +24,8 @@ compatibility is claimed unless it has been demonstrated.
 | M2.1 Kernel GDT | done, merged in `1e87504` (PR #1) | `docs/adr/ADR-0004-kernel-gdt.md` |
 | M2.2 `ExitBootServices` | done, merged in `02e5f3d` (PR #2) | `docs/testing/m2.2-exitbootservices-evidence.md` |
 | M2.2b TSS and IST | done, merged in `c376528` (PR #5) | `docs/testing/m2.2b-tss-ist-evidence.md` |
-| M2.3 Physical frame allocator | implemented, PR pending | `docs/testing/m2.3-frames-evidence.md` |
-| CI (GitHub Actions) | **passing on `main`** | run 39627317125 (main, `d916b45`); M2.3 PR pending |
+| M2.3 Physical frame allocator | done, merged in `870b677` (PR #6) | `docs/testing/m2.3-frames-evidence.md` |
+| CI (GitHub Actions) | **passing** | run 39635441041 (main, `870b677`) |
 | M3 Execution | not started | — |
 
 The boot chain implemented today:
