@@ -40,8 +40,8 @@ regression of the boot.
 In progress. M2.1 is merged into `main` (PR #1), M2.2 is merged into `main`
 (PR #2, `02e5f3d`), M2.2b (TSS and IST) is merged into `main` (PR #5,
 `c376528`), M2.3 (physical frame allocator) is merged into `main`
-(PR #6, `870b677`) and M2.4 (own paging) is implemented on
-`feat/m2.4-own-paging` with the pull request pending.
+(PR #6, `870b677`) and M2.4 (own paging) is merged into `main`
+(PR #7, `58dfadc`).
 
 | Step | Content | State |
 | ---- | ------- | ----- |
@@ -49,7 +49,7 @@ In progress. M2.1 is merged into `main` (PR #1), M2.2 is merged into `main`
 | M2.2 | `ExitBootServices` with the memory map key | done, merged in `02e5f3d`; evidence in `docs/testing/m2.2-exitbootservices-evidence.md`; ownership policy in `docs/adr/ADR-0007-memory-ownership-after-exitbootservices.md` |
 | M2.2b | TSS and IST stacks for `#NMI`, `#DF` and `#MC` | done, merged in `c376528`; evidence in `docs/testing/m2.2b-tss-ist-evidence.md`; decision in `docs/adr/ADR-0008-tss-and-ist.md` |
 | M2.3 | Physical memory manager, frame allocation and release | done, merged in `870b677` (PR #6); evidence in `docs/testing/m2.3-frames-evidence.md`; decision in `docs/adr/ADR-0009-physical-frame-allocator.md` |
-| M2.4 | Own paging, W^X, NX, controlled page faults | implemented, PR pending; evidence in `docs/testing/m2.4-paging-evidence.md`; decision in `docs/adr/ADR-0010-own-paging.md` |
+| M2.4 | Own paging, W^X, NX, controlled page faults | done, merged in `58dfadc` (PR #7); evidence in `docs/testing/m2.4-paging-evidence.md`; decision in `docs/adr/ADR-0010-own-paging.md` |
 | M2.5 | Kernel heap, allocation and fragmentation tests | not started |
 | M2.6 | Timer, monotonic clock, verified interrupts | not started |
 | M2.7 | Serial and framebuffer drivers without the firmware | not started |
@@ -85,7 +85,8 @@ M2.4 installs the kernel's own 4-level page tables, enables NX, imposes W^X
 on the kernel image, reports CR2 on a page fault and releases the boot
 services quarantine. The firmware page tables are released after the switch.
 ADR-0010 records the decision and the acceptance criteria are in
-`docs/specs/m2.4-own-paging.md`.
+`docs/specs/m2.4-own-paging.md`. It is merged in `58dfadc` (PR #7) with
+CI green on `main`.
 
 ## M3 — Execution
 

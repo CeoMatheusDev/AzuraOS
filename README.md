@@ -7,13 +7,12 @@ management, scheduler, IPC, drivers, userland, libraries and a desktop
 environment. Nothing is inherited from an existing kernel, and no
 compatibility is claimed unless it has been demonstrated.
 
-> **Status: M2.4 (own paging) implemented on `feat/m2.4-own-paging`; the pull
-> request is pending.** M2.3 is merged into `main`: the kernel builds a
-> physical frame allocator from the pre-`ExitBootServices` map, reserves the
-> kernel image and releases the boot services quarantine once it owns the
-> page tables. The kernel now installs its own 4-level page tables, enforces
-> W^X on the kernel image, and reports `CR2` on a page fault. The next step
-> is the kernel heap (M2.5).
+> **Status: M2.4 (own paging) merged into `main`.** M2.3 is merged into
+> `main`: the kernel builds a physical frame allocator from the
+> pre-`ExitBootServices` map and releases the boot services quarantine once
+> it owns the page tables. The kernel now installs its own 4-level page
+> tables, enforces W^X on the kernel image, and reports `CR2` on a page
+> fault. The next step is the kernel heap (M2.5).
 
 ## Current state
 
@@ -25,8 +24,8 @@ compatibility is claimed unless it has been demonstrated.
 | M2.2 `ExitBootServices` | done, merged in `02e5f3d` (PR #2) | `docs/testing/m2.2-exitbootservices-evidence.md` |
 | M2.2b TSS and IST | done, merged in `c376528` (PR #5) | `docs/testing/m2.2b-tss-ist-evidence.md` |
 | M2.3 Physical frame allocator | done, merged in `870b677` (PR #6) | `docs/testing/m2.3-frames-evidence.md` |
-| M2.4 Own paging | implemented, PR pending | `docs/testing/m2.4-paging-evidence.md` |
-| CI (GitHub Actions) | **passing on `main`** | run 39636012547 (main, `7b5b8eb`); M2.4 PR pending |
+| M2.4 Own paging | done, merged in `58dfadc` (PR #7) | `docs/testing/m2.4-paging-evidence.md` |
+| CI (GitHub Actions) | **passing** | run 39635441041 (main, `870b677`); M2.4 PR pending |
 | M3 Execution | not started | — |
 
 The boot chain implemented today:

@@ -879,7 +879,15 @@ VALIDAÇÃO LOCAL (QEMU/OVMF, Fedora 44, Zig 0.17.0, QEMU 10.2.2)
   Decisão:          docs/adr/ADR-0010-own-paging.md
 
 PUBLICAÇÃO E CI
-  Branch feat/m2.4-own-paging a ser publicada; PR e CI pendentes.
+  Branch feat/m2.4-own-paging publicada (commits 97f5e30 e 27805d5);
+  PR #7 aberto em https://github.com/CeoMatheusDev/AzuraOS/pull/7.
+  Runs 39638879876 e 39638892732 (push e PR): zig fmt PASS e
+  Build and test PASS (3m20s-3m30s).
+
+MERGE
+  PR #7 integrado em main com merge commit 58dfadc, depois de CI verde em
+  main no run 39635441041 (zig fmt e Build and test PASS). Nenhuma tag ou
+  release foi criada. Rollback: "git revert -m 1 58dfadc".
 
 LIMITAÇÕES / RISCOS
   - Testado apenas em QEMU/OVMF; nenhum hardware físico foi exercitado.
@@ -891,6 +899,5 @@ LIMITAÇÕES / RISCOS
     o mapeamento W^X cobre mesmo assim.
 
 PRÓXIMOS PASSOS
-  1. Publicar a branch, abrir o PR, aguardar CI verde e integrar em main.
-  2. M2.5: heap do kernel e testes de fragmentação.
-  3. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.
+  1. M2.5: heap do kernel e testes de fragmentação.
+  2. Tag v0.1.0-alpha.1 somente com autorização explícita do responsável.
